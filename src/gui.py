@@ -24,6 +24,7 @@ class App(ctk.CTk):
         self.exaggeration_var = ctk.DoubleVar(value=0.5)
         self.cfg_weight_var = ctk.DoubleVar(value=0.5)
         self.temperature_var = ctk.DoubleVar(value=1.0)
+        self.speed_var = ctk.DoubleVar(value=1.0) # 1.0 = 100%
         
         # UI構築
         self._setup_ui()
@@ -63,9 +64,14 @@ class App(ctk.CTk):
 
         self.lang_label = ctk.CTkLabel(self.sidebar, text="言語 (Multilingualのみ)")
         self.lang_label.pack(pady=(10, 0))
-        self.lang_option = ctk.CTkOptionMenu(self.sidebar, values=["ja", "en", "zh", "ko", "de", "fr", "it", "es", "pt", "pl", "tr", "ru", "nl", "cs", "ar", "hu", "hi", "he", "vi", "th", "id", "sv", "da"])
+        self.lang_option = ctk.CTkOptionMenu(self.sidebar, values=["ja", "en", "zh", "ko", "de", "fr", "it", "es"])
         self.lang_option.pack(pady=10, padx=20)
 
+        self.speed_label = ctk.CTkLabel(self.sidebar, text="話速 (Speed): 100%")
+        self.speed_label.pack(pady=(20, 0))
+        self.speed_slider = ctk.CTkSlider(self.sidebar, from_=0.1, to_=2.0, variable=self.speed_var, command=self._on_speed_change)
+        self.speed_slider.pack(pady=10, padx=20)
+        
         self.settings_button = ctk.CTkButton(self.sidebar, text="詳細設定", command=self._open_settings)
         self.settings_button.pack(side="bottom", pady=20, padx=20)
 
@@ -89,7 +95,7 @@ class App(ctk.CTk):
         # テキスト入力
         self.text_area = ctk.CTkTextbox(self.content_frame, font=ctk.CTkFont(size=14))
         self.text_area.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
-        self.text_area.insert("0.0", "ここに読み上げたいテキストを入力してください。")
+        self.text_area.insert("0.0", "ここに読み上げたいテキストを入力してください。\n\n【新機能】\n・サイドバーのスライダーで「話速（スピード）」を調整できます。\n・「詳細設定」ボタンから、感情の強さや抑揚を調整できます。\n・[laugh] や [chuckle] と入力すると、笑い声を混ぜることも可能です。")
 
         # 進捗バーとステータス
         self.status_label = ctk.CTkLabel(self.content_frame, text="準備完了", text_color="gray")
@@ -129,6 +135,9 @@ class App(ctk.CTk):
         file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.wav *.mp3")])
         if file_path:
             self.ref_path_var.set(file_path)
+
+    def _on_speed_change(self, value):
+        self.speed_label.configure(text=f"話速 (Speed): {int(value * 100)}%")
 
     def _on_model_change(self, model_type):
         def task():
@@ -202,6 +211,10 @@ class App(ctk.CTk):
             self._update_progress("音声を結合中...", 0.9)
             self.current_audio_tensor = merge_audio(tensors, self.engine.sample_rate)
             
+            # 話速調整
+            from .utils import adjust_speed
+            self.current_audio_tensor = adjust_speed(self.current_audio_tensor, self.speed_var.get())
+            
             self._update_progress("生成完了", 1.0)
             self._set_ui_state("normal")
             self.play_button.configure(state="normal")
@@ -270,6 +283,11 @@ class App(ctk.CTk):
                     tensors.append(tensor)
                 
                 combined = merge_audio(tensors, self.engine.sample_rate)
+                
+                # 話速調整
+                from .utils import adjust_speed
+                combined = adjust_speed(combined, self.speed_var.get())
+                
                 out_name = f"{os.path.splitext(filename)[0]}_{get_timestamp()}.wav"
                 save_wav(combined, self.engine.sample_rate, os.path.join(output_dir, out_name))
             

@@ -2,6 +2,7 @@ import re
 import os
 import torch
 import torchaudio
+import librosa
 from datetime import datetime
 
 def split_text(text: str):
@@ -84,3 +85,22 @@ def open_folder(path):
         subprocess.run(["open", path])
     else: # Linux
         subprocess.run(["xdg-open", path])
+
+def adjust_speed(audio_tensor, speed):
+    """
+    音声の速度を調整する（ピッチ維持）。
+    speed: 1.0 が標準。
+    """
+    if speed == 1.0:
+        return audio_tensor
+        
+    # numpyに変換
+    y = audio_tensor.cpu().numpy()
+    if y.ndim > 1:
+        y = y.squeeze()
+        
+    # タイムストレッチ
+    y_stretched = librosa.effects.time_stretch(y, rate=speed)
+    
+    # tensorに戻す
+    return torch.from_numpy(y_stretched).unsqueeze(0)
