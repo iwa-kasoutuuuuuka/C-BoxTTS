@@ -16,6 +16,14 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
+        # アイコン設定
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
+            if os.path.exists(icon_path):
+                self.after(200, lambda: self.iconbitmap(icon_path))
+        except:
+            pass
+
         # エンジン初期化
         self.engine = TTSEngine()
         self.current_audio_tensor = None
@@ -62,14 +70,18 @@ class App(ctk.CTk):
         else:
             self.device_option.set("cuda")
 
-        self.lang_label = ctk.CTkLabel(self.sidebar, text="言語 (Multilingualのみ)")
+        self.lang_label = ctk.CTkLabel(self.sidebar, text="対象言語 (Multilingual)")
         self.lang_label.pack(pady=(10, 0))
-        self.lang_option = ctk.CTkOptionMenu(self.sidebar, values=["ja", "en", "zh", "ko", "de", "fr", "it", "es"])
+        self.lang_option = ctk.CTkOptionMenu(self.sidebar, values=[
+            "ja", "en", "zh", "ko", "de", "fr", "it", "es", 
+            "pt", "pl", "tr", "ru", "nl", "cs", "ar", "hu", 
+            "hi", "el", "ro", "sv", "sk", "da", "fi"
+        ])
         self.lang_option.pack(pady=10, padx=20)
 
         self.speed_label = ctk.CTkLabel(self.sidebar, text="話速 (Speed): 100%")
         self.speed_label.pack(pady=(20, 0))
-        self.speed_slider = ctk.CTkSlider(self.sidebar, from_=0.1, to_=2.0, variable=self.speed_var, command=self._on_speed_change)
+        self.speed_slider = ctk.CTkSlider(self.sidebar, from_=0.1, to=2.0, variable=self.speed_var, command=self._on_speed_change)
         self.speed_slider.pack(pady=10, padx=20)
         
         self.settings_button = ctk.CTkButton(self.sidebar, text="詳細設定", command=self._open_settings)
@@ -96,18 +108,23 @@ class App(ctk.CTk):
         self.text_area = ctk.CTkTextbox(self.content_frame, font=ctk.CTkFont(size=14))
         self.text_area.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
         self.text_area.insert("0.0", "ここに読み上げたいテキストを入力してください。\n\n【新機能】\n・サイドバーのスライダーで「話速（スピード）」を調整できます。\n・「詳細設定」ボタンから、感情の強さや抑揚を調整できます。\n・[laugh] や [chuckle] と入力すると、笑い声を混ぜることも可能です。")
+        self.text_area.bind("<KeyRelease>", self._on_text_change)
+
+        # 文字数カウント
+        self.char_count_label = ctk.CTkLabel(self.content_frame, text="文字数: 0", text_color="gray")
+        self.char_count_label.grid(row=2, column=0, sticky="e", padx=25)
 
         # 進捗バーとステータス
         self.status_label = ctk.CTkLabel(self.content_frame, text="準備完了", text_color="gray")
-        self.status_label.grid(row=2, column=0, sticky="w", padx=25)
+        self.status_label.grid(row=3, column=0, sticky="w", padx=25)
         
         self.progress_bar = ctk.CTkProgressBar(self.content_frame)
-        self.progress_bar.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.progress_bar.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
         self.progress_bar.set(0)
 
         # 下部ボタン類
         self.button_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        self.button_frame.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.button_frame.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 20))
         
         self.gen_button = ctk.CTkButton(self.button_frame, text="音声を生成", font=ctk.CTkFont(size=16, weight="bold"), height=40, command=self._start_generation)
         self.gen_button.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -138,6 +155,10 @@ class App(ctk.CTk):
 
     def _on_speed_change(self, value):
         self.speed_label.configure(text=f"話速 (Speed): {int(value * 100)}%")
+
+    def _on_text_change(self, event=None):
+        text = self.text_area.get("0.0", "end").strip()
+        self.char_count_label.configure(text=f"文字数: {len(text)}")
 
     def _on_model_change(self, model_type):
         def task():
@@ -309,20 +330,26 @@ class App(ctk.CTk):
         main_label.pack(pady=20)
         
         # Exaggeration
-        ctk.CTkLabel(settings_win, text=f"感情の強調度 (Exaggeration): {self.exaggeration_var.get():.1f}").pack(pady=(10, 0))
-        exag_slider = ctk.CTkSlider(settings_win, from_=0.0, to_=2.0, variable=self.exaggeration_var)
+        exag_label = ctk.CTkLabel(settings_win, text=f"感情の強調度 (Exaggeration): {self.exaggeration_var.get():.1f}")
+        exag_label.pack(pady=(10, 0))
+        def update_exag(v): exag_label.configure(text=f"感情の強調度 (Exaggeration): {float(v):.1f}")
+        exag_slider = ctk.CTkSlider(settings_win, from_=0.0, to=2.0, variable=self.exaggeration_var, command=update_exag)
         exag_slider.pack(pady=10, padx=40, fill="x")
         ctk.CTkLabel(settings_win, text="0.0: フラット, 0.5: 標準, 1.0+: ドラマチック", font=ctk.CTkFont(size=10)).pack()
 
         # CFG Weight
-        ctk.CTkLabel(settings_win, text=f"抑揚の制御 (CFG Weight): {self.cfg_weight_var.get():.1f}").pack(pady=(20, 0))
-        cfg_slider = ctk.CTkSlider(settings_win, from_=0.0, to_=2.0, variable=self.cfg_weight_var)
+        cfg_label = ctk.CTkLabel(settings_win, text=f"抑揚の制御 (CFG Weight): {self.cfg_weight_var.get():.1f}")
+        cfg_label.pack(pady=(20, 0))
+        def update_cfg(v): cfg_label.configure(text=f"抑揚の制御 (CFG Weight): {float(v):.1f}")
+        cfg_slider = ctk.CTkSlider(settings_win, from_=0.0, to=2.0, variable=self.cfg_weight_var, command=update_cfg)
         cfg_slider.pack(pady=10, padx=40, fill="x")
         ctk.CTkLabel(settings_win, text="低いと動的、高いと安定・単調", font=ctk.CTkFont(size=10)).pack()
 
         # Temperature
-        ctk.CTkLabel(settings_win, text=f"表現の多様性 (Temperature): {self.temperature_var.get():.1f}").pack(pady=(20, 0))
-        temp_slider = ctk.CTkSlider(settings_win, from_=0.0, to_=2.0, variable=self.temperature_var)
+        temp_label = ctk.CTkLabel(settings_win, text=f"表現の多様性 (Temperature): {self.temperature_var.get():.1f}")
+        temp_label.pack(pady=(20, 0))
+        def update_temp(v): temp_label.configure(text=f"表現の多様性 (Temperature): {float(v):.1f}")
+        temp_slider = ctk.CTkSlider(settings_win, from_=0.0, to=2.0, variable=self.temperature_var, command=update_temp)
         temp_slider.pack(pady=10, padx=40, fill="x")
         ctk.CTkLabel(settings_win, text="高いと表現が変化しやすく、低いと一貫性が増す", font=ctk.CTkFont(size=10)).pack()
 

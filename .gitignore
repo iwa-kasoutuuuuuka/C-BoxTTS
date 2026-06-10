@@ -39,3 +39,19 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+
+# .NET (C#)
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# C-Box TTS Native Specific
+**/Release_Portable/
+*.log
+*.msi
+install_log.txt
+python_embeded/
+C-BoxTTS_Portable/

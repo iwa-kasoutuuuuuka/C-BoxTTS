@@ -1,0 +1,6 @@
+Inputs:
+  speech_tokens: -1,-1 (System.Int64)
+  speaker_embeddings: -1,192 (System.Single)
+  speaker_features: -1,-1,80 (System.Single)
+Outputs:
+  waveform: -1,-1 (System.Single)

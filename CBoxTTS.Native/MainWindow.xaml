@@ -1,0 +1,153 @@
+<Window x:Class="CBoxTTS.Native.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="C-Box TTS Native" Height="700" Width="1100"
+        Background="{StaticResource BackgroundBrush}"
+        WindowStyle="None" AllowsTransparency="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="8" CornerRadius="15" GlassFrameThickness="0"/>
+    </WindowChrome.WindowChrome>
+
+    
+    <Border BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="1" CornerRadius="15" Background="{StaticResource BackgroundBrush}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- サイドバー (詳細設定) -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" CornerRadius="15,0,0,15" Padding="25">
+                <Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <!-- タイトル文字自体をドラッグハンドルにする (IsHitTestVisible=True) -->
+                            <TextBlock Text="C-Box TTS Native" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" 
+                                     Margin="0,0,0,30" Cursor="SizeAll" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"/>
+                            
+                            <TextBlock Text="言語 (Language)" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <ComboBox x:Name="LanguageCombo" SelectedIndex="0" Margin="0,0,0,25" Height="35" SelectionChanged="LanguageCombo_SelectionChanged">
+                                <ComboBoxItem Content="日本語 (Japanese)"/>
+                                <ComboBoxItem Content="英語 (English)"/>
+                            </ComboBox>
+
+                            <TextBlock Text="音声モデル設定" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <ComboBox x:Name="ModelCombo" SelectedIndex="1" Margin="0,0,0,25" Height="35" SelectionChanged="ModelCombo_SelectionChanged">
+                                <ComboBoxItem Content="Chatterbox Turbo (Fast)"/>
+                                <ComboBoxItem Content="Chatterbox Multilingual (Standard)"/>
+                                <ComboBoxItem Content="Chatterbox English (Exclusive)"/>
+                            </ComboBox>
+
+                            <TextBlock Text="詳細パラメーター" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <Border Height="1" Background="#444" Margin="0,0,0,20"/>
+
+                            <!-- 誇張度 -->
+                            <DockPanel Margin="0,0,0,15">
+                                <TextBlock Text="誇張度 (Exaggeration)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                                <TextBlock Text="{Binding ElementName=ExaggerationSlider, Path=Value, StringFormat={}{0:F2}}" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="40" TextAlignment="Right"/>
+                                <Slider x:Name="ExaggerationSlider" Minimum="0" Maximum="1" Value="0.5" TickFrequency="0.01" IsSnapToTickEnabled="True"/>
+                            </DockPanel>
+
+                            <!-- スピード -->
+                            <DockPanel Margin="0,0,0,15">
+                                <TextBlock Text="話速 (Speed)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                                <TextBlock Text="{Binding ElementName=SpeedSlider, Path=Value, StringFormat={}{0:F2}x}" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="40" TextAlignment="Right"/>
+                                <Slider x:Name="SpeedSlider" Minimum="0.5" Maximum="2.0" Value="1.0" TickFrequency="0.01" IsSnapToTickEnabled="True"/>
+                            </DockPanel>
+
+
+
+
+                        <!-- 参照音声選択 -->
+                        <TextBlock Text="参照音声 (Voice Prompt)" Foreground="White" Margin="0,20,0,5"/>
+                        <Grid Margin="0,0,0,25">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="VoicePromptPathText" IsReadOnly="True" Text="default_voice.wav" Height="30" Foreground="LightGray"/>
+
+                            <Button Grid.Column="1" Content="選択" Width="50" Margin="5,0,0,0" Click="SelectVoice_Click"/>
+                        </Grid>
+
+                        <!-- 進行状況 -->
+                        <StackPanel VerticalAlignment="Bottom" Margin="0,50,0,0">
+                            <TextBlock x:Name="StatusText" Text="初期化中..." Foreground="Orange" FontSize="12" TextWrapping="Wrap"/>
+                            <ProgressBar x:Name="StatusProgress" Height="6" Margin="0,10,0,0" IsIndeterminate="True" Background="#222" Foreground="{StaticResource PrimaryBrush}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!-- メインエリア -->
+            <Grid Grid.Column="1" Margin="30">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-20,-20,20">
+
+                    <Button Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="Gray" Width="40" Height="40" Click="MinimizeButton_Click" ToolTip="最小化"/>
+                    <Button x:Name="MaximizeBtn" Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="Gray" Width="40" Height="40" Click="MaximizeButton_Click" ToolTip="最大化"/>
+                    <Button Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="White" Width="40" Height="40" Click="ExitButton_Click" ToolTip="終了"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <TextBlock x:Name="CharCountText" Text="0 文字" Foreground="Gray" FontSize="14"/>
+                </StackPanel>
+
+                <!-- テキスト入力 -->
+                <Border Grid.Row="1" Background="#252525" CornerRadius="10" Padding="15" Margin="0,10,0,0" BorderBrush="#333" BorderThickness="1">
+                    <Grid>
+                        <TextBox x:Name="InputTextBox" Background="Transparent" Foreground="White" BorderThickness="0" 
+                                 FontSize="20" TextWrapping="Wrap" AcceptsReturn="True" 
+                                 VerticalScrollBarVisibility="Auto" TextChanged="InputTextBox_TextChanged"
+                                 CaretBrush="White" SelectionBrush="{StaticResource PrimaryBrush}"/>
+                        
+                        <TextBlock x:Name="WatermarkText" Text="ここに読み上げたい日本語を入力してください..." 
+                                   Foreground="Gray" FontSize="20" IsHitTestVisible="False" VerticalAlignment="Top" Margin="2,2,0,0" Opacity="0.5">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ElementName=InputTextBox, Path=Text}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding ElementName=InputTextBox, Path=Text}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+
+                <!-- 下部ボタン -->
+                <Grid Grid.Row="2" Margin="0,30,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <Button x:Name="ClearButton" Content="クリア" Background="Transparent" Foreground="Gray" BorderThickness="1" BorderBrush="#444" Width="80" Height="50" Margin="0,0,10,0" Click="ClearButton_Click"/>
+                    
+                    <Button x:Name="PlayButton" Grid.Column="2" Content="再生" Width="180" Height="55" FontSize="18" FontWeight="Bold" Margin="0,0,15,0" Click="PlayButton_Click"/>
+                    <Button x:Name="SaveButton" Grid.Column="3" Content="WAV保存" Width="120" Height="55" Background="#444" Click="SaveButton_Click"/>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
+

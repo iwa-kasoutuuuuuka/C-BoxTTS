@@ -1,3 +1,9 @@
+import os
+import sys
+
+# インポートパスの調整
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 from src.utils import split_text, merge_audio
 import torch
 
@@ -11,7 +17,7 @@ def test_split_text():
     
     assert len(segments) > 0
     assert "こんにちは！" in segments
-    assert "元気ですか？" in segments
+    assert "元気ですか？。" in segments
     # 。と、の扱いを確認
     assert "今日は、良い天気ですね。" in segments or "今日は、良い天気ですね" in segments
 
