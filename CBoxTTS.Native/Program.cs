@@ -76,7 +76,7 @@ namespace CBoxTTS.Native
                 // 英語
                 string textEn = "It works beautifully on multilingual model!";
                 Console.WriteLine($"[EN Test] Input: {textEn}");
-                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.7f,
                     morph, tokenizer, 708, msg => Console.WriteLine($"  [EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_out.wav");
@@ -102,7 +102,7 @@ namespace CBoxTTS.Native
 
                 string textEn = "This is a test of the English exclusive model. Hello world!";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
-                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.5f,
                     morph, tokenizer, 1, msg => Console.WriteLine($"  [English EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");
@@ -129,7 +129,7 @@ namespace CBoxTTS.Native
                 // 日本語
                 string textJa = "せかいはかくのほのおにつつまれた。だがじんるいはぜつめつしてはいなかった。";
                 Console.WriteLine($"[JA Test] Input: {textJa}");
-                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
+                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.7f,
                     morph, tokenizer, 723, msg => Console.WriteLine($"  [JA Status] {msg}"));
                 
                 string outPathJa = Path.Combine(baseDir, "test_harness_japanese_out.wav");
@@ -155,7 +155,7 @@ namespace CBoxTTS.Native
 
                 string textJa = "ターボモデルのテストです。素早く合成が行われます。";
                 Console.WriteLine($"[Turbo JA Test] Input: {textJa}");
-                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
+                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.6f,
                     morph, tokenizer, 723, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
 
                 string outPathJa = Path.Combine(baseDir, "test_harness_turbo_japanese_out.wav");
@@ -182,7 +182,7 @@ namespace CBoxTTS.Native
                 // 日本語
                 string textJa = "せかいはかくのほのおにつつまれた。だがじんるいはぜつめつしてはいなかった。";
                 Console.WriteLine($"[JA Test] Input: {textJa}");
-                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
+                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.7f,
                     morph, tokenizer, 723, msg => Console.WriteLine($"  [JA Status] {msg}"));
                 
                 string outPathJa = Path.Combine(baseDir, "test_harness_japanese_out.wav");
@@ -192,7 +192,7 @@ namespace CBoxTTS.Native
                 // 英語
                 string textEn = "It works beautifully on multilingual model!";
                 Console.WriteLine($"[EN Test] Input: {textEn}");
-                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.7f,
                     morph, tokenizer, 708, msg => Console.WriteLine($"  [EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_out.wav");
@@ -218,7 +218,7 @@ namespace CBoxTTS.Native
 
                 string textJa = "ターボモデルのテストです。素早く合成が行われます。";
                 Console.WriteLine($"[Turbo JA Test] Input: {textJa}");
-                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
+                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.6f,
                     morph, tokenizer, 723, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
 
                 string outPathJa = Path.Combine(baseDir, "test_harness_turbo_japanese_out.wav");
@@ -244,7 +244,7 @@ namespace CBoxTTS.Native
 
                 string textEn = "This is a test of the English exclusive model. Hello world!";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
-                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.5f,
                     morph, tokenizer, 1, msg => Console.WriteLine($"  [English EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");

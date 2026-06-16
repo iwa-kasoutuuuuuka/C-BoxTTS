@@ -30,7 +30,7 @@ Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.dll") -ErrorAction 
 Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.pdb") -ErrorAction SilentlyContinue
 
 # Copy Models
-$sourceModels = "bin\Debug\net10.0-windows\win-x64\models"
+$sourceModels = "bin\Release_EN\net10.0-windows\win-x64\models"
 $targetModelsDir = Join-Path $fullOutputPath "models"
 New-Item -ItemType Directory -Path $targetModelsDir -Force
 

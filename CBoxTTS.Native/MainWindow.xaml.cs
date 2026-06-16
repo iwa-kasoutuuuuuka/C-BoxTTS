@@ -29,37 +29,38 @@ namespace CBoxTTS.Native
         private void ApplyBuildSpecificUI()
         {
 #if EN_BUILD
-            Title = "C-Box TTS English Edition";
+            Title = "C-Box TTS 英語版 (English Edition)";
             TitleText.Text = "C-Box TTS EN";
             
             LanguageLabel.Visibility = Visibility.Collapsed;
             LanguageCombo.Visibility = Visibility.Collapsed;
             
-            ModelLabel.Text = "Speech Model Settings";
+            ModelLabel.Text = "音声モデル設定";
             ModelCombo.Items.Clear();
-            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Standard (English)" });
-            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Multilingual" });
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Standard (英語専用)" });
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Multilingual (多言語・高品質)" });
             ModelCombo.SelectedIndex = 0;
             
-            ParametersLabel.Text = "Advanced Parameters";
-            ExaggerationLabel.Text = "Exaggeration";
-            SpeedLabel.Text = "Speed";
-            VoicePromptLabel.Text = "Voice Prompt";
+            ParametersLabel.Text = "詳細パラメーター";
+            ExaggerationLabel.Text = "誇張度 (Exaggeration)";
+            SpeedLabel.Text = "話速 (Speed)";
+            TemperatureLabel.Text = "安定性 (Stability)";
+            VoicePromptLabel.Text = "参照音声 (Voice Prompt)";
             
-            WatermarkText.Text = "Type the text you want to read aloud here...";
-            ClearButton.Content = "Clear";
-            PlayButton.Content = "Play";
-            SaveButton.Content = "Save WAV";
+            WatermarkText.Text = "ここに読み上げたいテキストを入力してください...";
+            ClearButton.Content = "クリア";
+            PlayButton.Content = "再生";
+            SaveButton.Content = "WAV保存";
             
-            StatusText.Text = "Initializing...";
+            StatusText.Text = "初期化中...";
 
-            SelectVoiceButton.Content = "Select";
-            MinimizeBtn.ToolTip = "Minimize";
-            MaximizeBtn.ToolTip = "Maximize";
-            ExitBtn.ToolTip = "Exit";
-            CharCountText.Text = "0 chars";
+            SelectVoiceButton.Content = "選択";
+            MinimizeBtn.ToolTip = "最小化";
+            MaximizeBtn.ToolTip = "最大化";
+            ExitBtn.ToolTip = "閉じる";
+            CharCountText.Text = "0 文字";
 #elif JA_BUILD
-            Title = "C-Box TTS Japanese Edition";
+            Title = "C-Box TTS 日本語版 (Japanese Edition)";
             TitleText.Text = "C-Box TTS JA";
             
             ModelCombo.Items.Clear();
@@ -67,6 +68,7 @@ namespace CBoxTTS.Native
             ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Multilingual (多言語・高品質)" });
             ModelCombo.SelectedIndex = 0;
             
+            TemperatureLabel.Text = "安定性 (Stability)";
             StatusText.Text = "初期化中...";
 #endif
         }
@@ -106,7 +108,7 @@ namespace CBoxTTS.Native
                 _morph = new MorphemeEngine(baseDir);
 
 #if EN_BUILD
-                StatusText.Text = "Initializing components...";
+                StatusText.Text = "コンポーネントを初期化中...";
 #else
                 StatusText.Text = GetMsg("辞書ファイルをチェック中...", "Checking dictionary files...");
                 await _morph.EnsureDictionaryExistsAsync();
@@ -167,6 +169,18 @@ namespace CBoxTTS.Native
                 if (ModelCombo?.SelectedIndex == 0) selectedType = ModelType.Turbo;
                 else if (ModelCombo?.SelectedIndex == 2) selectedType = ModelType.English;
 #endif
+
+                // モデルの種類に応じて TemperatureSlider のデフォルト値を自動セット
+                float defaultTemp = selectedType switch
+                {
+                    ModelType.English => 0.5f,
+                    ModelType.Turbo => 0.6f,
+                    _ => 0.7f
+                };
+                if (TemperatureSlider != null)
+                {
+                    TemperatureSlider.Value = defaultTemp;
+                }
 
                 StatusText.Text = GetMsg($"{selectedType} モデルを準備中...", $"Preparing {selectedType} model...");
                 StatusText.Foreground = System.Windows.Media.Brushes.Orange;
@@ -419,7 +433,26 @@ namespace CBoxTTS.Native
                 e.Handled = true;
             }
         }
+        private void TemperatureText_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (double.TryParse(TemperatureText.Text, out double val))
+            {
+                if (val < 0.1) val = 0.1;
+                if (val > 1.2) val = 1.2;
+                TemperatureSlider.Value = val;
+            }
+            TemperatureText.Text = TemperatureSlider.Value.ToString("F2");
+        }
 
+        private void TemperatureText_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                TemperatureText_LostFocus(sender, e);
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+        }
         private void VoicePrompt_DragOver(object sender, DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -469,11 +502,7 @@ namespace CBoxTTS.Native
 
         private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-#if EN_BUILD
-            CharCountText.Text = $"{InputTextBox.Text.Length} chars";
-#else
             CharCountText.Text = $"{InputTextBox.Text.Length} 文字";
-#endif
         }
 
         private void ClearButton_Click(object sender, RoutedEventArgs e)
@@ -528,6 +557,7 @@ namespace CBoxTTS.Native
 
                 float exaggeration = (float)ExaggerationSlider.Value;
                 float speed = (float)SpeedSlider.Value;
+                float temperature = (float)TemperatureSlider.Value;
                 string voicePath = VoicePromptPathText.Text;
                 
                 if (!Path.IsPathRooted(voicePath))
@@ -539,7 +569,7 @@ namespace CBoxTTS.Native
 
                 var wav = await Task.Run(async () =>
                 {
-                    return await _engine!.GenerateBatchAsync(text, voicePath, exaggeration,
+                    return await _engine!.GenerateBatchAsync(text, voicePath, exaggeration, temperature,
                         _morph!, _tokenizer!, langToken, msg =>
                         {
                             Dispatcher.Invoke(() => StatusText.Text = msg);
@@ -594,6 +624,7 @@ namespace CBoxTTS.Native
 
                     float exaggeration = (float)ExaggerationSlider.Value;
                     float speed = (float)SpeedSlider.Value;
+                    float temperature = (float)TemperatureSlider.Value;
                     string voicePath = VoicePromptPathText.Text;
                     
                     if (!Path.IsPathRooted(voicePath))
@@ -610,7 +641,7 @@ namespace CBoxTTS.Native
                         StatusText.Text = GetMsg("保存用に合成中...", "Generating for saving...");
                         var wav = await Task.Run(async () =>
                         {
-                            return await _engine!.GenerateBatchAsync(lines[0], voicePath, exaggeration,
+                            return await _engine!.GenerateBatchAsync(lines[0], voicePath, exaggeration, temperature,
                                 _morph!, _tokenizer!, langToken, msg =>
                                 {
                                     Dispatcher.Invoke(() => StatusText.Text = msg);
@@ -634,7 +665,7 @@ namespace CBoxTTS.Native
                             
                             var wav = await Task.Run(async () =>
                             {
-                                return await _engine!.GenerateBatchAsync(line, voicePath, exaggeration,
+                                return await _engine!.GenerateBatchAsync(line, voicePath, exaggeration, temperature,
                                     _morph!, _tokenizer!, langToken, msg =>
                                     {
                                         Dispatcher.Invoke(() => StatusText.Text = $"{msg} ({i + 1}/{lines.Count})");
@@ -665,11 +696,7 @@ namespace CBoxTTS.Native
 
         private string GetMsg(string ja, string en)
         {
-#if EN_BUILD
-            return en;
-#else
             return ja;
-#endif
         }
 
         protected override void OnClosed(EventArgs e)

@@ -27,7 +27,7 @@ Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.dll") -ErrorAction 
 Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.pdb") -ErrorAction SilentlyContinue
 
 # Copy Models
-$sourceModels = "bin\Debug\net10.0-windows\win-x64\models"
+$sourceModels = "bin\Release_JA\net10.0-windows\win-x64\models"
 $targetModelsDir = Join-Path $fullOutputPath "models"
 New-Item -ItemType Directory -Path $targetModelsDir -Force
 
@@ -47,7 +47,7 @@ foreach ($model in $modelsToCopy) {
 }
 
 # Copy Dictionary (MeCab)
-$sourceDic = "bin\Debug\net10.0-windows\win-x64\dic"
+$sourceDic = "bin\Release_JA\net10.0-windows\win-x64\dic"
 if (Test-Path $sourceDic) {
     Write-Host "Copying dictionary..."
     Copy-Item -Path $sourceDic -Destination $fullOutputPath -Recurse -Force

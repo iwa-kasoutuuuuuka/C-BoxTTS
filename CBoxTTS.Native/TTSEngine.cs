@@ -259,7 +259,7 @@ namespace CBoxTTS.Native
             return new DenseTensor<T>(src.ToArray(), src.Dimensions);
         }
 
-        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f)
+        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f, float temperature = 0.8f)
         {
             if (_speechEncoder == null || _languageModel == null || _condDecoder == null || _embedTokens == null)
                 throw new InvalidOperationException("モデルがロードされていません。");
@@ -448,8 +448,8 @@ namespace CBoxTTS.Native
                         }
                     }
 
-                    // 確率的サンプリング (temperature = 0.8f, topP = 0.95f, minP = 0.05f)
-                    long nextToken = Sample(logits, 0.8f, 0.95f, 0.05f, random);
+                    // 確率的サンプリング (temperature, topP = 0.95f, minP = 0.05f)
+                    long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
 
                     // generate_tokens に追加
                     generateTokens.Add(nextToken);
@@ -541,13 +541,13 @@ namespace CBoxTTS.Native
         /// 長文を句読点で分割して個別に合成し、波形を結合するバッチ合成メソッド。
         /// 長文入力による自己回帰ループ崩壊を防ぐ。
         /// </summary>
-        public async Task<float[]> GenerateBatchAsync(string fullText, string voicePath, float exaggeration, 
+        public async Task<float[]> GenerateBatchAsync(string fullText, string voicePath, float exaggeration, float temperature, 
             MorphemeEngine morph, Tokenizer tokenizer, long langToken, Action<string>? statusCallback = null)
         {
             Log("=== GenerateBatchAsync 開始 ===");
             
             string normalizedText = fullText;
-            if (langToken == 708) // 英語 ([en] トークン, ID=708)
+            if (langToken == 708 || langToken == 1) // 英語 ([en] トークン または 英語専用モデルの UNK トークン)
             {
                 normalizedText = EnglishNormalizer.Normalize(fullText);
             }
@@ -566,7 +566,8 @@ namespace CBoxTTS.Native
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
-                return await GenerateAsync(ids, voicePath, exaggeration);
+                var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature);
+                return PadAudio(singleWav);
             }
 
             var allWavChunks = new List<float[]>();
@@ -587,7 +588,7 @@ namespace CBoxTTS.Native
                 }
                 
                 var sentenceIds = tokenizer.Encode(processedText, langToken);
-                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration);
+                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature);
                 
                 if (wav != null && wav.Length > 0)
                 {
@@ -621,7 +622,25 @@ namespace CBoxTTS.Native
             }
 
             Log($"バッチ合成完了。合計長: {result.Length} サンプル, チャンク数: {allWavChunks.Count}");
-            return result;
+            return PadAudio(result);
+        }
+
+        /// <summary>
+        /// 音声波形の冒頭と末尾に無音パディングを追加して、再生時の頭切れやぶつ切りを防ぐ。
+        /// </summary>
+        private float[] PadAudio(float[] audio)
+        {
+            if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
+
+            // 冒頭に 0.15秒 (3600サンプル)、末尾に 0.10秒 (2400サンプル) の無音を追加
+            int startPadding = 3600;
+            int endPadding = 2400;
+
+            var padded = new float[audio.Length + startPadding + endPadding];
+            Array.Copy(audio, 0, padded, startPadding, audio.Length);
+
+            Log($"無音パディング適用: 冒頭 {startPadding} サンプル, 末尾 {endPadding} サンプルを追加");
+            return padded;
         }
 
         /// <summary>

@@ -109,7 +109,7 @@ namespace CBoxTTS.Native
             Log($"入力テキスト: \"{text}\", 言語トークンID: {languageToken}");
 
             string processed = text;
-            if (languageToken == 708) // 英語 ([en] トークン, ID=708) の場合のみ適用
+            if (languageToken == 708 || languageToken == 1) // 英語 ([en] または 英語専用モデル) の場合のみ適用
             {
                 // 記号正規化 (punc_norm)
                 processed = PuncNorm(processed);

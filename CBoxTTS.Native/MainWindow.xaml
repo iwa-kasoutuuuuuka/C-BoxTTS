@@ -66,6 +66,13 @@
                                 <Slider x:Name="SpeedSlider" Minimum="0.5" Maximum="2.0" Value="1.0" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
                             </DockPanel>
 
+                            <!-- 安定性 (Stability) -->
+                            <DockPanel Margin="0,0,0,15">
+                                <TextBlock x:Name="TemperatureLabel" Text="安定性 (Stability)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                                <TextBox x:Name="TemperatureText" Text="{Binding ElementName=TemperatureSlider, Path=Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:F2}}" LostFocus="TemperatureText_LostFocus" KeyDown="TemperatureText_KeyDown" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="50" Height="25" TextAlignment="Right" VerticalContentAlignment="Center" Background="#252525" BorderBrush="#444" BorderThickness="1" Margin="5,0,0,0"/>
+                                <Slider x:Name="TemperatureSlider" Minimum="0.1" Maximum="1.2" Value="0.6" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                            </DockPanel>
+
 
 
 
