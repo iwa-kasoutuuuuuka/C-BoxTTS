@@ -4,7 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="C-Box TTS Native" Height="700" Width="1100"
+        Title="C-Box TTS Native" Height="700" Width="1100" Icon="assets/icon.png"
         Background="{StaticResource BackgroundBrush}"
         WindowStyle="None" AllowsTransparency="True"
         WindowStartupLocation="CenterScreen"
@@ -27,7 +27,12 @@
                 <Grid>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
-                            <!-- タイトル文字自体をドラッグハンドルにする (IsHitTestVisible=True) -->
+                            <!-- アプリアイコンロゴの表示 -->
+                            <Image Source="assets/icon.png" Width="64" Height="64" HorizontalAlignment="Left" Margin="0,0,0,15" Stretch="UniformToFill">
+                                <Image.Clip>
+                                    <RectangleGeometry Rect="0,0,64,64" RadiusX="10" RadiusY="10"/>
+                                </Image.Clip>
+                            </Image>
                             <TextBlock x:Name="TitleText" Text="C-Box TTS Native" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" 
                                      Margin="0,0,0,30" Cursor="SizeAll" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"/>
                             

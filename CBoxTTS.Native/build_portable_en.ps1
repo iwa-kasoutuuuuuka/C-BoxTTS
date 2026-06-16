@@ -51,6 +51,13 @@ foreach ($model in $modelsToCopy) {
 
 # 形態素解析辞書 (dic) はコピーしない（MeCabを使用しないため）
 
+# Copy Assets
+$sourceAssets = "assets"
+if (Test-Path $sourceAssets) {
+    Write-Host "Copying assets..."
+    Copy-Item -Path $sourceAssets -Destination $fullOutputPath -Recurse -Force
+}
+
 # Copy Specification (仕様書)
 $specPath = "..\ポータブル版仕様書_Native_EN.md"
 if (Test-Path $specPath) {

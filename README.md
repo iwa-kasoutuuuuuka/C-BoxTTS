@@ -1,5 +1,9 @@
 # C-Box TTS Native (Japanese & English Edition)
 
+<p align="center">
+  <img src="CBoxTTS.Native/assets/icon.png" alt="C-Box TTS Logo" width="128" height="128" />
+</p>
+
 完全ローカルかつ超軽量・高速に動作する .NET/C# ネイティブ（WPF）音声合成（TTS）アプリケーションです。  
 Python 環境や PyTorch などの巨大な外部依存を一切必要とせず、Windows 上でスタンドアロンかつ即座に動作します。
 

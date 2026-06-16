@@ -16,8 +16,14 @@
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
 
     <DebugType>embedded</DebugType>
+    <ApplicationIcon>assets\icon.ico</ApplicationIcon>
 
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\icon.png" />
+    <Resource Include="assets\icon.ico" />
+  </ItemGroup>
 
   <!-- ビルド構成に応じたアセンブリ名と定数の定義 -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release_JA'">
