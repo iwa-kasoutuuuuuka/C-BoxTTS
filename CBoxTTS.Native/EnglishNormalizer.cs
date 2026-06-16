@@ -34,28 +34,96 @@ namespace CBoxTTS.Native
         {
             if (string.IsNullOrWhiteSpace(text)) return text;
 
-            // 1. 記号の展開 ($ や % など)
-            text = text.Replace("%", " percent");
-            // $100 -> 100 dollars のような簡易変換
-            text = Regex.Replace(text, @"\$(\d+)", "$1 dollars");
-
-            // 2. 単語境界で略語を展開
+            // 1. 略語の展開
             foreach (var kvp in Abbreviations)
             {
-                // 単語境界を意識して置換
                 string pattern = @"\b" + Regex.Escape(kvp.Key);
                 text = Regex.Replace(text, pattern, kvp.Value, RegexOptions.IgnoreCase);
             }
 
-            // 3. 数値の展開 (\b\d+\b)
-            text = Regex.Replace(text, @"\b\d+\b", m =>
+            // 2. ドルの置換 ($12,345.67 -> twelve thousand three hundred and forty-five dollars and sixty-seven cents)
+            text = Regex.Replace(text, @"\$(\d+(?:,\d+)*(?:\.\d+)?)", m =>
             {
-                if (long.TryParse(m.Value, out long num))
+                string valStr = m.Groups[1].Value.Replace(",", "");
+                if (valStr.Contains('.'))
+                {
+                    string[] parts = valStr.Split('.');
+                    if (parts.Length == 2)
+                    {
+                        if (long.TryParse(parts[0], out long dollars))
+                        {
+                            string centPart = parts[1];
+                            if (centPart.Length == 1) centPart += "0";
+                            else if (centPart.Length > 2) centPart = centPart.Substring(0, 2);
+
+                            if (long.TryParse(centPart, out long cents))
+                            {
+                                string dollarStr = dollars == 1 ? "dollar" : "dollars";
+                                string centStr = cents == 1 ? "cent" : "cents";
+
+                                if (dollars > 0 && cents > 0)
+                                    return $"{NumberToWords(dollars)} {dollarStr} and {NumberToWords(cents)} {centStr}";
+                                else if (dollars > 0)
+                                    return $"{NumberToWords(dollars)} {dollarStr}";
+                                else if (cents > 0)
+                                    return $"{NumberToWords(cents)} {centStr}";
+                                else
+                                    return "zero dollars";
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    if (long.TryParse(valStr, out long dollars))
+                    {
+                        string dollarStr = dollars == 1 ? "dollar" : "dollars";
+                        return $"{NumberToWords(dollars)} {dollarStr}";
+                    }
+                }
+                return m.Value;
+            });
+
+            // 3. 小数の置換 (12.34 -> twelve point three four)
+            text = Regex.Replace(text, @"\b\d+(?:,\d+)*\.\d+\b", m =>
+            {
+                string valStr = m.Value.Replace(",", "");
+                string[] parts = valStr.Split('.');
+                if (parts.Length == 2 && long.TryParse(parts[0], out long integerPart))
+                {
+                    string decimalPart = parts[1];
+                    string[] ones = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
+                    var decimalWords = new List<string>();
+                    foreach (char digit in decimalPart)
+                    {
+                        if (char.IsDigit(digit))
+                        {
+                            decimalWords.Add(ones[digit - '0']);
+                        }
+                    }
+                    return $"{NumberToWords(integerPart)} point {string.Join(" ", decimalWords)}";
+                }
+                return m.Value;
+            });
+
+            // 4. 整数の置換 (12,345 -> twelve thousand three hundred and forty-five)
+            text = Regex.Replace(text, @"\b\d+(?:,\d+)*\b", m =>
+            {
+                string valStr = m.Value.Replace(",", "");
+                if (long.TryParse(valStr, out long num))
                 {
                     return NumberToWords(num);
                 }
                 return m.Value;
             });
+
+            // 5. 記号の置換
+            text = text.Replace("%", " percent");
+            text = Regex.Replace(text, @"\s+&\s+", " and ");
+            text = Regex.Replace(text, @"\b&\b", "and");
+
+            // 6. 余分なスペースの整理
+            text = Regex.Replace(text, @"\s+", " ").Trim();
 
             return text;
         }

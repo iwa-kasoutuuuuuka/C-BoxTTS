@@ -1,48 +1,80 @@
-# C-Box TTS Japanese Edition
+# C-Box TTS Native (Japanese & English Edition)
 
-完全ローカル・ポータブル動作の高品質日本語音声合成（TTS）アプリケーションです。
-Resemble AIのChatterboxエンジンをベースに、日本語環境への完全最適化と高度なスタイル制御を実装しています。
+完全ローカルかつ超軽量・高速に動作する .NET/C# ネイティブ（WPF）音声合成（TTS）アプリケーションです。  
+Python 環境や PyTorch などの巨大な外部依存を一切必要とせず、Windows 上でスタンドアロンかつ即座に動作します。
 
-## 特徴
+---
 
-- **完全ローカル動作**: 初回セットアップ後はオフラインで動作し、外部サーバーへデータを送信しません。
-- **高度なスタイル制御**:
-  - **話速調整**: 10% 〜 200% の範囲で、声の質を変えずにスピードを調整可能。
-  - **詳細設定**: 感情の強調度 (Exaggeration)、抑揚の制御 (CFG Weight)、表現の多様性 (Temperature) をスライダーで直感的に操作。
-  - **感情タグ対応**: テキストに `[laugh]`, `[chuckle]`, `[cough]` などを入れることで非言語表現が可能。
-- **多言語・多モデル対応**: 
-  - Turbo (高速), Standard (標準), Multilingual (23言語・クローニング対応) の3モデルを切り替え可能。
-  - C# (Native) 版では、英語読み上げ時の数値・略語展開 (`EnglishNormalizer`) や小文字化、記号正規化を独自実装し、英語の品質を大幅に高めています。
-- **ポータブル・自動構築**: 
-  - 配布サイズを最小化した「ランチャー方式」。起動時に最適なAI環境を自動構築します。
+## 🌟 主な特徴
 
-## 操作方法
+- **完全ローカル・オフライン動作**: 初回起動時のモデル取得後は一切通信を行わず、プライバシーを完全に保護。
+- **DirectML ネイティブサポート**: GPU（NVIDIA, AMD, Intel 等）によるハードウェアアクセラレーションを標準サポートし、高速な推論が可能。
+- **Python不要・即時起動**: 重い Python 実行環境や、数GBに及ぶ PyTorch/CUDA の環境構築は一切不要。
+- **言語別ポータブル構成（完全分離）**:
+  - **日本語版 (JA)**: MeCab による形態素解析と言語辞書フォルダを同梱し、自然な日本語読み上げが可能な「Turbo（日本語専用・高速）」および「Multilingual」モデルをサポート。
+  - **英語版 (EN)**: 日本語解析エンジン（MeCab）や関連辞書ファイルを完全に排除し、パッケージサイズとメモリフットプリントを極限まで軽量化した英語専用の高速・高品質パッケージ。
+- **テキスト正規化 (English Normalizer)**:
+  - 英語読み上げ時において、略語展開 (`Mr.`, `Dr.` 等)、カンマ区切り数値 (`12,345` -> `twelve thousand...`)、小数表記 (`12.34` -> `twelve point three four`)、通貨・セント表記 (`$1.50` -> `one dollar and fifty cents`) を自動的かつ高品質にテキスト展開して自然な発音を実現。
+- **日本語処理のセーフガードとデバッグ**:
+  - Unicode NFC (FormC) 正規化の導入により、濁音・半濁音の文字分離バグを根本解決。
+  - 未知文字・全角記号が検出された場合に自動的にマッピングをクリップし、モデル境界エラーによるクラッシュを防ぐ安全装置（境界インデックスセーフガード）を搭載。
 
-1. **モデルの選択**: サイドバーから使用したいモデルを選びます（日本語はMultilingual推奨）。
-2. **テキスト入力**: 読み上げたい文章を入力します。長文は自動的に適切な句読点で分割処理されます。
-3. **スタイル調整**: サイドバーのスピードスライダーや「詳細設定」から声を調整します。
-4. **生成・再生**: 「音声を生成」ボタンを押し、完了後に「再生」で確認、「保存」でWAV出力します。
-5. **一括処理**: フォルダ内の複数テキストファイルを一度に音声化できます。
+---
 
-## セットアップ（ポータブル版）
+## 🛠️ パッケージの構成と場所
 
-1. `C-BoxTTS.exe` を起動します。
-2. 「セットアップを開始」をクリックすると、必要なAIエンジンが自動ダウンロードされます。
+ポータブルパッケージのビルドスクリプトを実行すると、以下のディレクトリに完全なポータブル版が構築されます。
 
-### ネットワークが不安定な場合（手動ダウンロード）
-以下のファイルを事前にダウンロードして `C-BoxTTS.exe` と同じ場所に配置することで、構築を高速化・オフライン化できます。
+### 1. 日本語ポータブル版 (Release_Portable_JA)
+*   **パス**: `CBoxTTS.Native/Release_Portable_JA`
+*   **メイン実行ファイル**: `CBoxTTS.Native.JA.exe`
+*   **特徴**: MeCab辞書および日本語対応モデル（Turbo / Multilingual）を同梱。
 
-- **AIエンジンパッケージ (約2GB)**:
-  - `packages` というフォルダを新規作成し、その中に以下の3つを入れてください。
-  - [PyTorch (2.0GB)](https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-win_amd64.whl)
-  - [Torchaudio (4MB)](https://download.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp310-cp310-win_amd64.whl)
-  - [Torchvision (7MB)](https://download.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp310-cp310-win_amd64.whl)
-- **pip管理ツール**:
-  - [get-pip.py](https://bootstrap.pypa.io/get-pip.py) (EXEと同じ場所に配置)
+### 2. 英語ポータブル版 (Release_Portable_EN)
+*   **パス**: `CBoxTTS.Native/Release_Portable_EN`
+*   **メイン実行ファイル**: `CBoxTTS.Native.EN.exe`
+*   **特徴**: 日本語辞書やMeCabを徹底的に排除した超軽量仕様。英語専用モデル / Multilingualをサポート。
 
-## ライセンス
+各パッケージの詳細については、同梱およびルートに配置されている仕様書をご覧ください。
+- [ポータブル版仕様書_Native_JA.md](ポータブル版仕様書_Native_JA.md)
+- [ポータブル版仕様書_Native_EN.md](ポータブル版仕様書_Native_EN.md)
+
+---
+
+## 🚀 使い方
+
+### GUI（ウィンドウ起動）
+パッケージ内の `CBoxTTS.Native.JA.exe` または `CBoxTTS.Native.EN.exe` をダブルクリックして起動します。
+美麗なダークモード対応のモダンUIで、テキスト入力、パラメータ（話速、感情誇張度等）の調整、リアルタイム再生およびWAVファイルへの書き出し・一括保存を行えます。
+
+### CLI（コマンドライン起動・テストハーネス）
+コマンドプロンプトまたは PowerShell から `--test` 引数付きで実行することで、GUI を起動せずに音声合成の動作確認が可能です。
+
+```powershell
+# 日本語版のテスト実行
+.\CBoxTTS.Native.JA.exe --test
+
+# 英語版のテスト実行
+.\CBoxTTS.Native.EN.exe --test
+```
+実行すると、カレントディレクトリにテスト結果の音声ファイル（`test_harness_japanese_out.wav` や `test_harness_english_exclusive_out.wav`）が出力されます。
+
+---
+
+## 📦 ビルド方法（ポータブルパッケージの作成）
+
+開発環境（.NET 10 SDK 導入済み）でポータブルパッケージを自らビルド・パブリッシュするには、`CBoxTTS.Native` フォルダ内の以下のスクリプトを PowerShell から実行します。
+
+*   **日本語版のビルド**: `.\build_portable_ja.ps1`
+*   **英語版のビルド**: `.\build_portable_en.ps1`
+
+実行すると、自動的に ReadyToRun の最適化ビルドが行われ、必要な依存ライブラリ、モデルファイル、仕様書がそれぞれのポータブルパッケージフォルダへ自動配置されます。
+
+---
+
+## ⚖️ ライセンス
 [MIT License](LICENSE)
 
-## クレジット
-- Engine: [Chatterbox (Resemble AI)](https://github.com/resemble-ai/chatterbox)
-- UI: [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)
+## 👏 クレジット
+- 推論コアエンジン: [Chatterbox (Resemble AI)](https://github.com/resemble-ai/chatterbox)
+- 音響モデル提供およびコミュニティ: [onnx-community](https://huggingface.co/onnx-community)

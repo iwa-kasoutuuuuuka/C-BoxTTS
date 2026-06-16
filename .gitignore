@@ -50,6 +50,8 @@ Thumbs.db
 
 # C-Box TTS Native Specific
 **/Release_Portable/
+**/Release_Portable_JA/
+**/Release_Portable_EN/
 *.log
 *.msi
 install_log.txt

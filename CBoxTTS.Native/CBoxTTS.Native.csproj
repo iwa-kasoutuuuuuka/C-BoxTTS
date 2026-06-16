@@ -19,9 +19,22 @@
 
   </PropertyGroup>
 
+  <!-- ビルド構成に応じたアセンブリ名と定数の定義 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_JA'">
+    <AssemblyName>CBoxTTS.Native.JA</AssemblyName>
+    <DefineConstants>JA_BUILD</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_EN'">
+    <AssemblyName>CBoxTTS.Native.EN</AssemblyName>
+    <DefineConstants>EN_BUILD</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Release'">
+    <AssemblyName>CBoxTTS.Native</AssemblyName>
+  </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MeCab.DotNet" Version="0.0.40" />
+    <!-- 英語版ビルド以外（Debug, Release, Release_JA）のみ MeCab.DotNet を参照 -->
+    <PackageReference Include="MeCab.DotNet" Version="0.0.40" Condition="'$(Configuration)' != 'Release_EN'" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

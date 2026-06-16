@@ -22,7 +22,53 @@ namespace CBoxTTS.Native
         public MainWindow()
         {
             InitializeComponent();
+            ApplyBuildSpecificUI();
             Loaded += MainWindow_Loaded;
+        }
+
+        private void ApplyBuildSpecificUI()
+        {
+#if EN_BUILD
+            Title = "C-Box TTS English Edition";
+            TitleText.Text = "C-Box TTS EN";
+            
+            LanguageLabel.Visibility = Visibility.Collapsed;
+            LanguageCombo.Visibility = Visibility.Collapsed;
+            
+            ModelLabel.Text = "Speech Model Settings";
+            ModelCombo.Items.Clear();
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Standard (English)" });
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Multilingual" });
+            ModelCombo.SelectedIndex = 0;
+            
+            ParametersLabel.Text = "Advanced Parameters";
+            ExaggerationLabel.Text = "Exaggeration";
+            SpeedLabel.Text = "Speed";
+            VoicePromptLabel.Text = "Voice Prompt";
+            
+            WatermarkText.Text = "Type the text you want to read aloud here...";
+            ClearButton.Content = "Clear";
+            PlayButton.Content = "Play";
+            SaveButton.Content = "Save WAV";
+            
+            StatusText.Text = "Initializing...";
+
+            SelectVoiceButton.Content = "Select";
+            MinimizeBtn.ToolTip = "Minimize";
+            MaximizeBtn.ToolTip = "Maximize";
+            ExitBtn.ToolTip = "Exit";
+            CharCountText.Text = "0 chars";
+#elif JA_BUILD
+            Title = "C-Box TTS Japanese Edition";
+            TitleText.Text = "C-Box TTS JA";
+            
+            ModelCombo.Items.Clear();
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Turbo (日本語専用・高速)" });
+            ModelCombo.Items.Add(new ComboBoxItem { Content = "Chatterbox Multilingual (多言語・高品質)" });
+            ModelCombo.SelectedIndex = 0;
+            
+            StatusText.Text = "初期化中...";
+#endif
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -45,7 +91,7 @@ namespace CBoxTTS.Native
                 var cleanMarker = Path.Combine(modelsDir, ".cleaned_v2");
                 if (Directory.Exists(modelsDir) && !File.Exists(cleanMarker))
                 {
-                    StatusText.Text = "古いモデルキャッシュをクリーンアップ中...";
+                    StatusText.Text = GetMsg("古いモデルキャッシュをクリーンアップ中...", "Cleaning up legacy model cache...");
                     foreach (var file in Directory.GetFiles(modelsDir))
                     {
                         string name = Path.GetFileName(file);
@@ -59,13 +105,17 @@ namespace CBoxTTS.Native
 
                 _morph = new MorphemeEngine(baseDir);
 
-                StatusText.Text = "辞書ファイルをチェック中...";
+#if EN_BUILD
+                StatusText.Text = "Initializing components...";
+#else
+                StatusText.Text = GetMsg("辞書ファイルをチェック中...", "Checking dictionary files...");
                 await _morph.EnsureDictionaryExistsAsync();
+#endif
 
                 // 初回ロード (初期設定に基づく)
                 await ApplyModelSettingsAsync();
 
-                StatusText.Text = "準備完了";
+                StatusText.Text = GetMsg("準備完了", "Ready");
                 StatusText.Foreground = System.Windows.Media.Brushes.LightGreen;
                 StatusProgress.Visibility = Visibility.Collapsed;
                 UpdateModelComboItemsAvailability(LanguageCombo.SelectedIndex);
@@ -79,12 +129,12 @@ namespace CBoxTTS.Native
 
         private void ShowError(Exception ex)
         {
-            StatusText.Text = "エラー発生。詳細は error.log を確認してください。";
+            StatusText.Text = GetMsg("エラー発生。詳細は error.log を確認してください。", "Error occurred. Check error.log for details.");
             StatusText.Foreground = System.Windows.Media.Brushes.Red;
             StatusProgress.Visibility = Visibility.Collapsed;
             string errorMsg = ex.ToString();
             try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "error.log"), errorMsg); } catch { }
-            MessageBox.Show($"エラーが発生しました:\n{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(GetMsg($"エラーが発生しました:\n{ex.Message}", $"An error occurred:\n{ex.Message}"), GetMsg("エラー", "Error"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         private bool _isApplyingSettings = false;
@@ -109,10 +159,16 @@ namespace CBoxTTS.Native
                 StatusProgress.IsIndeterminate = true;
 
                 ModelType selectedType = ModelType.Multilingual;
+#if EN_BUILD
+                if (ModelCombo?.SelectedIndex == 0) selectedType = ModelType.English;
+#elif JA_BUILD
+                if (ModelCombo?.SelectedIndex == 0) selectedType = ModelType.Turbo;
+#else
                 if (ModelCombo?.SelectedIndex == 0) selectedType = ModelType.Turbo;
                 else if (ModelCombo?.SelectedIndex == 2) selectedType = ModelType.English;
+#endif
 
-                StatusText.Text = $"{selectedType} モデルを準備中...";
+                StatusText.Text = GetMsg($"{selectedType} モデルを準備中...", $"Preparing {selectedType} model...");
                 StatusText.Foreground = System.Windows.Media.Brushes.Orange;
                 
                 // モデルファイルの存在確認とダウンロード
@@ -146,7 +202,7 @@ namespace CBoxTTS.Native
                     _morph?.Initialize();
                 });
 
-                StatusText.Text = "準備完了";
+                StatusText.Text = GetMsg("準備完了", "Ready");
                 StatusText.Foreground = System.Windows.Media.Brushes.LightGreen;
             }
             catch (Exception ex)
@@ -181,6 +237,10 @@ namespace CBoxTTS.Native
 
         private async void LanguageCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+#if EN_BUILD || JA_BUILD
+            if (!_isInitialized) return;
+            await ApplyModelSettingsAsync();
+#else
             if (ModelCombo == null || WatermarkText == null || InputTextBox == null || !_isInitialized || _isUpdatingSelection) return;
 
             try
@@ -190,10 +250,8 @@ namespace CBoxTTS.Native
                 int langIdx = LanguageCombo.SelectedIndex;
                 int modelIdx = ModelCombo.SelectedIndex;
 
-                // 1. まずモデルコンボの項目有効無効状態を更新
                 UpdateModelComboItemsAvailability(langIdx);
 
-                // 2. 言語に適合しないモデルが選択されていた場合は、安全なフォールバックに切り替え
                 if (langIdx == 0) // 日本語
                 {
                     WatermarkText.Text = "ここに読み上げたい日本語を入力してください...";
@@ -217,29 +275,38 @@ namespace CBoxTTS.Native
                 _isUpdatingSelection = false;
             }
 
-            // 選択変更の確定後に非同期でモデルのロードを実行
             await ApplyModelSettingsAsync();
+#endif
         }
 
         private void UpdateModelComboItemsAvailability(int langIdx)
         {
+#if EN_BUILD || JA_BUILD
+            // ビルド専用版ではコンボボックスの選択肢は常に有効なものだけを配置しているため、何もしない
+            return;
+#else
             if (ModelCombo == null) return;
 
             // 0: Turbo (Fast) - 日本語専用とするため、英語の時は無効化
-            if (ModelCombo.Items[0] is ComboBoxItem turboItem)
+            if (ModelCombo.Items.Count > 0 && ModelCombo.Items[0] is ComboBoxItem turboItem)
             {
                 turboItem.IsEnabled = (langIdx == 0);
             }
 
             // 2: English (Exclusive) - 英語専用のため、英語の時のみ有効化
-            if (ModelCombo.Items[2] is ComboBoxItem englishItem)
+            if (ModelCombo.Items.Count > 2 && ModelCombo.Items[2] is ComboBoxItem englishItem)
             {
                 englishItem.IsEnabled = (langIdx == 1);
             }
+#endif
         }
 
         private async void ModelCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+#if EN_BUILD || JA_BUILD
+            if (!_isInitialized || _isUpdatingSelection) return;
+            await ApplyModelSettingsAsync();
+#else
             if (LanguageCombo == null || !_isInitialized || _isUpdatingSelection) return;
 
             try
@@ -268,6 +335,7 @@ namespace CBoxTTS.Native
 
             // 選択変更の確定後に非同期でモデルのロードを実行
             await ApplyModelSettingsAsync();
+#endif
         }
 
 
@@ -380,7 +448,7 @@ namespace CBoxTTS.Native
                     }
                     else
                     {
-                        MessageBox.Show("WAVまたはMP3ファイルのみドラッグ＆ドロップ可能です。", "エラー", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        MessageBox.Show(GetMsg("WAVまたはMP3ファイルのみドラッグ＆ドロップ可能です。", "Only WAV or MP3 files can be drag-and-dropped."), GetMsg("警告", "Warning"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     }
                 }
             }
@@ -390,8 +458,8 @@ namespace CBoxTTS.Native
         {
             var ofd = new OpenFileDialog
             {
-                Filter = "音声ファイル (*.wav;*.mp3)|*.wav;*.mp3",
-                Title = "参照音声 (ボイスプロンプト) を選択"
+                Filter = GetMsg("音声ファイル (*.wav;*.mp3)|*.wav;*.mp3", "Audio Files (*.wav;*.mp3)|*.wav;*.mp3"),
+                Title = GetMsg("参照音声 (ボイスプロンプト) を選択", "Select Voice Prompt (Reference Audio)")
             };
             if (ofd.ShowDialog() == true)
             {
@@ -401,7 +469,11 @@ namespace CBoxTTS.Native
 
         private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
+#if EN_BUILD
+            CharCountText.Text = $"{InputTextBox.Text.Length} chars";
+#else
             CharCountText.Text = $"{InputTextBox.Text.Length} 文字";
+#endif
         }
 
         private void ClearButton_Click(object sender, RoutedEventArgs e)
@@ -417,6 +489,13 @@ namespace CBoxTTS.Native
         /// </summary>
         private long GetCurrentLangToken()
         {
+#if EN_BUILD
+            int modelIdx = ModelCombo?.SelectedIndex ?? 0;
+            if (modelIdx == 0) return 1; // English (Exclusive)
+            return 708; // Multilingual (English)
+#elif JA_BUILD
+            return 723; // 日本語固定
+#else
             int modelIdx = ModelCombo?.SelectedIndex ?? 1;
             int langIdx  = LanguageCombo?.SelectedIndex ?? 0;
 
@@ -426,13 +505,14 @@ namespace CBoxTTS.Native
             if (langIdx == 0) return 723;
             // Multilingual + 英語 ([en] トークン, ID=708)
             return 708;
+#endif
         }
 
         private async void PlayButton_Click(object sender, RoutedEventArgs e)
         {
             if (!_isInitialized)
             {
-                MessageBox.Show("現在エンジンの初期化中です。しばらくお待ちください...", "初期化中", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(GetMsg("現在エンジンの初期化中です。しばらくお待ちください...", "Initializing engine. Please wait..."), GetMsg("初期化中", "Initializing"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -444,7 +524,7 @@ namespace CBoxTTS.Native
             {
                 PlayButton.IsEnabled = false;
                 StatusProgress.Visibility = Visibility.Visible;
-                StatusText.Text = "音声合成中...";
+                StatusText.Text = GetMsg("音声合成中...", "Generating speech...");
 
                 float exaggeration = (float)ExaggerationSlider.Value;
                 float speed = (float)SpeedSlider.Value;
@@ -467,14 +547,14 @@ namespace CBoxTTS.Native
                 });
 
 
-                StatusText.Text = "再生中...";
+                StatusText.Text = GetMsg("再生中...", "Playing...");
                 _audio.Play(wav, speed);
-                StatusText.Text = "準備完了";
+                StatusText.Text = GetMsg("準備完了", "Ready");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"合成エラー: {ex.Message}");
-                StatusText.Text = "エラー発生";
+                MessageBox.Show(GetMsg($"合成エラー: {ex.Message}", $"Generation error: {ex.Message}"), GetMsg("エラー", "Error"), MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusText.Text = GetMsg("エラー発生", "Error occurred");
             }
             finally
             {
@@ -500,7 +580,7 @@ namespace CBoxTTS.Native
 
             var sfd = new SaveFileDialog
             {
-                Filter = "WAVファイル (*.wav)|*.wav",
+                Filter = GetMsg("WAVファイル (*.wav)|*.wav", "WAV Files (*.wav)|*.wav"),
                 FileName = "output.wav"
             };
 
@@ -527,7 +607,7 @@ namespace CBoxTTS.Native
                     if (lines.Count == 1)
                     {
                         // 1行のみの場合は従来どおり直接その名前で保存
-                        StatusText.Text = "保存用に合成中...";
+                        StatusText.Text = GetMsg("保存用に合成中...", "Generating for saving...");
                         var wav = await Task.Run(async () =>
                         {
                             return await _engine!.GenerateBatchAsync(lines[0], voicePath, exaggeration,
@@ -550,7 +630,7 @@ namespace CBoxTTS.Native
                             string line = lines[i];
                             string numberedPath = Path.Combine(dir, $"{filenameNoExt}_{i + 1}{ext}");
                             
-                            StatusText.Text = $"保存用に合成中... ({i + 1}/{lines.Count})";
+                            StatusText.Text = GetMsg($"保存用に合成中... ({i + 1}/{lines.Count})", $"Generating for saving... ({i + 1}/{lines.Count})");
                             
                             var wav = await Task.Run(async () =>
                             {
@@ -564,15 +644,15 @@ namespace CBoxTTS.Native
                         }
                     }
 
-                    StatusText.Text = "保存完了";
+                    StatusText.Text = GetMsg("保存完了", "Save completed");
                     MessageBox.Show(lines.Count == 1 
-                        ? "WAVファイルを保存しました。" 
-                        : $"{lines.Count} 個のWAVファイルに分割して保存しました。");
+                        ? GetMsg("WAVファイルを保存しました。", "Saved WAV file successfully.") 
+                        : GetMsg($"{lines.Count} 個のWAVファイルに分割して保存しました。", $"Saved {lines.Count} split WAV files successfully."), GetMsg("情報", "Info"), MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"保存エラー: {ex.Message}");
-                    StatusText.Text = "エラー発生";
+                    MessageBox.Show(GetMsg($"保存エラー: {ex.Message}", $"Save error: {ex.Message}"), GetMsg("エラー", "Error"), MessageBoxButton.OK, MessageBoxImage.Error);
+                    StatusText.Text = GetMsg("エラー発生", "Error occurred");
                 }
                 finally
                 {
@@ -581,6 +661,15 @@ namespace CBoxTTS.Native
                     StatusProgress.Visibility = Visibility.Collapsed;
                 }
             }
+        }
+
+        private string GetMsg(string ja, string en)
+        {
+#if EN_BUILD
+            return en;
+#else
+            return ja;
+#endif
         }
 
         protected override void OnClosed(EventArgs e)

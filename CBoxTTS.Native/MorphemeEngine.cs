@@ -1,3 +1,37 @@
+#if EN_BUILD
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace CBoxTTS.Native
+{
+    public class MorphemeEngine : IDisposable
+    {
+        public MorphemeEngine(string baseDir)
+        {
+        }
+
+        public Task EnsureDictionaryExistsAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public void Initialize()
+        {
+        }
+
+        public List<(string Surface, string Reading)> Analyze(string text)
+        {
+            // 英語版ビルドではMeCabによる形態素解析を行わないため、空のリストを返す
+            return new List<(string Surface, string Reading)>();
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+}
+#else
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,7 +47,7 @@ namespace CBoxTTS.Native
     {
         private MeCabTagger? _tagger;
         private readonly string _dicPath;
-        private const string DicUrl = "https://github.com/shogo82148/mecab-ipadic-neologd/releases/download/v20200910/mecab-ipadic-neologd-20200910.tar.gz"; // 代替案が必要な場合あり
+        private const string DicUrl = "https://github.com/shogo82148/mecab-ipadic-neologd/releases/download/v20200910/mecab-ipadic-neologd-20200910.tar.gz";
 
         public MorphemeEngine(string baseDir)
         {
@@ -49,7 +83,6 @@ namespace CBoxTTS.Native
 
                 Log($"MeCab初期化開始: {path}");
                 
-                // 標準的な初期化方式に戻す（SingleFile解除により動作可能）
                 var param = new MeCabParam { DicDir = path };
                 _tagger = MeCabTagger.Create(param);
                 
@@ -62,10 +95,6 @@ namespace CBoxTTS.Native
             }
         }
 
-
-
-
-
         private void Log(string message)
         {
             try
@@ -76,7 +105,6 @@ namespace CBoxTTS.Native
             catch { }
         }
 
-
         public List<(string Surface, string Reading)> Analyze(string text)
         {
             if (_tagger == null) throw new InvalidOperationException("MorphemeEngineが初期化されていません。");
@@ -86,15 +114,11 @@ namespace CBoxTTS.Native
             
             foreach (var node in nodes)
             {
-                // BOS/EOS (文頭・文末の仮想ノード) を除外
                 if (node.Stat == MeCabNodeStat.Nor || node.Stat == MeCabNodeStat.Unk)
                 {
-                    // IPADICのFeature形式: 品詞,品詞細分類1,...,読み,発音
                     var features = node.Feature.Split(',');
-                    // 読みが「*」（アスタリスク）の場合は、安全のため元の Surface を使用する
                     string reading = (features.Length > 7 && features[7] != "*") ? features[7] : node.Surface;
                     
-                    // カタカナをひらがなに変換 (簡易実装)
                     reading = ToHiragana(reading);
                     result.Add((node.Surface, reading));
                 }
@@ -114,3 +138,4 @@ namespace CBoxTTS.Native
         }
     }
 }
+#endif

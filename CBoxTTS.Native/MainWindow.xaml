@@ -28,35 +28,35 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <!-- タイトル文字自体をドラッグハンドルにする (IsHitTestVisible=True) -->
-                            <TextBlock Text="C-Box TTS Native" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" 
+                            <TextBlock x:Name="TitleText" Text="C-Box TTS Native" FontSize="26" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" 
                                      Margin="0,0,0,30" Cursor="SizeAll" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"/>
                             
-                            <TextBlock Text="言語 (Language)" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock x:Name="LanguageLabel" Text="言語 (Language)" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
                             <ComboBox x:Name="LanguageCombo" SelectedIndex="0" Margin="0,0,0,25" Height="35" SelectionChanged="LanguageCombo_SelectionChanged">
                                 <ComboBoxItem Content="日本語 (Japanese)"/>
                                 <ComboBoxItem Content="英語 (English)"/>
                             </ComboBox>
 
-                            <TextBlock Text="音声モデル設定" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock x:Name="ModelLabel" Text="音声モデル設定" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
                             <ComboBox x:Name="ModelCombo" SelectedIndex="1" Margin="0,0,0,25" Height="35" SelectionChanged="ModelCombo_SelectionChanged">
                                 <ComboBoxItem Content="Chatterbox Turbo (Fast)"/>
                                 <ComboBoxItem Content="Chatterbox Multilingual (Standard)"/>
                                 <ComboBoxItem Content="Chatterbox English (Exclusive)"/>
                             </ComboBox>
 
-                            <TextBlock Text="詳細パラメーター" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock x:Name="ParametersLabel" Text="詳細パラメーター" FontSize="16" FontWeight="Bold" Foreground="White" Margin="0,0,0,15"/>
                             <Border Height="1" Background="#444" Margin="0,0,0,20"/>
 
                             <!-- 誇張度 -->
                             <DockPanel Margin="0,0,0,15">
-                                <TextBlock Text="誇張度 (Exaggeration)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="ExaggerationLabel" Text="誇張度 (Exaggeration)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
                                 <TextBox x:Name="ExaggerationText" Text="{Binding ElementName=ExaggerationSlider, Path=Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:F2}}" LostFocus="ExaggerationText_LostFocus" KeyDown="ExaggerationText_KeyDown" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="50" Height="25" TextAlignment="Right" VerticalContentAlignment="Center" Background="#252525" BorderBrush="#444" BorderThickness="1" Margin="5,0,0,0"/>
                                 <Slider x:Name="ExaggerationSlider" Minimum="0" Maximum="1" Value="0.5" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
                             </DockPanel>
 
                             <!-- スピード -->
                             <DockPanel Margin="0,0,0,15">
-                                <TextBlock Text="話速 (Speed)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="SpeedLabel" Text="話速 (Speed)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
                                 <TextBox x:Name="SpeedText" Text="{Binding ElementName=SpeedSlider, Path=Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:F2}}" LostFocus="SpeedText_LostFocus" KeyDown="SpeedText_KeyDown" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="50" Height="25" TextAlignment="Right" VerticalContentAlignment="Center" Background="#252525" BorderBrush="#444" BorderThickness="1" Margin="5,0,0,0"/>
                                 <Slider x:Name="SpeedSlider" Minimum="0.5" Maximum="2.0" Value="1.0" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
                             </DockPanel>
@@ -65,7 +65,7 @@
 
 
                         <!-- 参照音声選択 -->
-                        <TextBlock Text="参照音声 (Voice Prompt)" Foreground="White" Margin="0,20,0,5"/>
+                        <TextBlock x:Name="VoicePromptLabel" Text="参照音声 (Voice Prompt)" Foreground="White" Margin="0,20,0,5"/>
                         <Grid Margin="0,0,0,25" AllowDrop="True" PreviewDragOver="VoicePrompt_DragOver" Drop="VoicePrompt_Drop">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -73,7 +73,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="VoicePromptPathText" IsReadOnly="True" Text="default_voice.wav" Height="30" Foreground="LightGray" AllowDrop="True" PreviewDragOver="VoicePrompt_DragOver" Drop="VoicePrompt_Drop"/>
 
-                            <Button Grid.Column="1" Content="選択" Width="50" Margin="5,0,0,0" Click="SelectVoice_Click"/>
+                            <Button x:Name="SelectVoiceButton" Grid.Column="1" Content="選択" Width="50" Margin="5,0,0,0" Click="SelectVoice_Click"/>
                         </Grid>
 
                         <!-- 進行状況 -->
@@ -96,9 +96,9 @@
 
                 <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-20,-20,20">
 
-                    <Button Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="Gray" Width="40" Height="40" Click="MinimizeButton_Click" ToolTip="最小化"/>
+                    <Button x:Name="MinimizeBtn" Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="Gray" Width="40" Height="40" Click="MinimizeButton_Click" ToolTip="最小化"/>
                     <Button x:Name="MaximizeBtn" Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="Gray" Width="40" Height="40" Click="MaximizeButton_Click" ToolTip="最大化"/>
-                    <Button Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="White" Width="40" Height="40" Click="ExitButton_Click" ToolTip="終了"/>
+                    <Button x:Name="ExitBtn" Content="" FontFamily="Segoe MDL2 Assets" Background="Transparent" Foreground="White" Width="40" Height="40" Click="ExitButton_Click" ToolTip="終了"/>
                 </StackPanel>
 
                 <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
