@@ -11,7 +11,7 @@ class App(ctk.CTk):
         super().__init__()
 
         # ウィンドウ設定
-        self.title("C-Box TTS Japanese Edition")
+        self.title("C-Box TTS English Edition")
         self.geometry("900x700")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -28,18 +28,27 @@ class App(ctk.CTk):
         self.engine = TTSEngine()
         self.current_audio_tensor = None
         
-        # 感情・スタイルパラメータ
-        self.exaggeration_var = ctk.DoubleVar(value=0.5)
-        self.cfg_weight_var = ctk.DoubleVar(value=0.5)
+        # ベースディレクトリとユーザー辞書パスの設定
+        import sys
+        if getattr(sys, 'frozen', False):
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.user_dict_path = os.path.join(self.base_dir, "user_dict_en.txt")
+        self._ensure_user_dictionary_template()
+        
+        # 感情・スタイルパラメータ（英語版向け精度向上調整：デフォルト 0.3）
+        self.exaggeration_var = ctk.DoubleVar(value=0.3)
+        self.cfg_weight_var = ctk.DoubleVar(value=0.3)
         self.temperature_var = ctk.DoubleVar(value=1.0)
         self.speed_var = ctk.DoubleVar(value=1.0) # 1.0 = 100%
         
         # UI構築
         self._setup_ui()
         
-        # 初期状態は Turbo なので、言語オプションは ja に設定し無効化する
+        # 初期状態は Standard なので、言語オプションは en に設定し無効化する
         try:
-            self.lang_option.set("ja")
+            self.lang_option.set("en")
             self.lang_option.configure(state="disabled")
         except Exception:
             pass
@@ -50,6 +59,24 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"警告: オーディオデバイスの初期化に失敗しました: {e}")
 
+    def _ensure_user_dictionary_template(self):
+        """ユーザー辞書のテンプレートファイルが存在しない場合は自動作成する"""
+        if not os.path.exists(self.user_dict_path):
+            try:
+                template = (
+                    "# C-Box TTS User Dictionary (English Edition)\n"
+                    "# Format: Word,Read\n"
+                    "# Lines starting with # are comments.\n"
+                    "# Examples:\n"
+                    "# AI,Artificial Intelligence\n"
+                    "# ChatGPT,Chat Gee Pee Tee\n"
+                    "# TTS,Text To Speech\n"
+                )
+                with open(self.user_dict_path, "w", encoding="utf-8") as f:
+                    f.write(template)
+            except Exception as e:
+                print(f"Warning: Failed to create user dictionary template: {e}")
+
     def _setup_ui(self):
         # メインフレーム
         self.grid_columnconfigure(1, weight=1)
@@ -59,14 +86,16 @@ class App(ctk.CTk):
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="C-Box TTS", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label = ctk.CTkLabel(self.sidebar, text="C-Box TTS EN", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.pack(pady=20, padx=20)
 
         self.model_label = ctk.CTkLabel(self.sidebar, text="モデル設定")
         self.model_label.pack(pady=(10, 0))
         
-        self.model_option = ctk.CTkOptionMenu(self.sidebar, values=["Turbo", "Standard", "Multilingual"], command=self._on_model_change)
+        # 英語特化版のため、選択肢から Turbo を除外し Standard デフォルトにする
+        self.model_option = ctk.CTkOptionMenu(self.sidebar, values=["Standard", "Multilingual"], command=self._on_model_change)
         self.model_option.pack(pady=10, padx=20)
+        self.model_option.set("Standard")
         
         self.device_label = ctk.CTkLabel(self.sidebar, text="デバイス")
         self.device_label.pack(pady=(10, 0))
@@ -79,8 +108,9 @@ class App(ctk.CTk):
 
         self.lang_label = ctk.CTkLabel(self.sidebar, text="対象言語 (Multilingual)")
         self.lang_label.pack(pady=(10, 0))
+        # 英語(en)を最上位に配置
         self.lang_option = ctk.CTkOptionMenu(self.sidebar, values=[
-            "ja", "en", "zh", "ko", "de", "fr", "it", "es", 
+            "en", "ja", "zh", "ko", "de", "fr", "it", "es", 
             "pt", "pl", "tr", "ru", "nl", "cs", "ar", "hu", 
             "hi", "el", "ro", "sv", "sk", "da", "fi"
         ])
@@ -111,10 +141,10 @@ class App(ctk.CTk):
         self.ref_button = ctk.CTkButton(self.ref_frame, text="参照音声を選択", width=120, command=self._browse_ref_audio)
         self.ref_button.pack(side="right")
 
-        # テキスト入力
+        # テキスト入力（英語サンプル文を設定）
         self.text_area = ctk.CTkTextbox(self.content_frame, font=ctk.CTkFont(size=14))
         self.text_area.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
-        self.text_area.insert("0.0", "ここに読み上げたいテキストを入力してください。\n\n【新機能】\n・サイドバーのスライダーで「話速（スピード）」を調整できます。\n・「詳細設定」ボタンから、感情の強さや抑揚を調整できます。\n・[laugh] や [chuckle] と入力すると、笑い声を混ぜることも可能です。")
+        self.text_area.insert("0.0", "Hello, this is the English edition of C-Box TTS.\n\nType the text you want to read aloud here.\n- You can adjust the speed using the slider on the left.\n- Type [laugh] or [chuckle] to insert laughter into the speech.")
         self.text_area.bind("<KeyRelease>", self._on_text_change)
 
         # 文字数カウント
@@ -199,8 +229,8 @@ class App(ctk.CTk):
         error_msg = f"モデルのロードに失敗しました:\n\n{error_trace}"
         messagebox.showerror("エラー", error_msg)
         self._set_ui_state("normal")
-        # モデルドロップダウンの表示を、現在エンジンにロードされているモデル（またはデフォルトのTurbo）に戻す
-        current_model = self.engine.model_type if self.engine.model_type else "Turbo"
+        # モデルドロップダウンの表示を、現在エンジンにロードされているモデル（またはデフォルトのStandard）に戻す
+        current_model = self.engine.model_type if self.engine.model_type else "Standard"
         self.model_option.set(current_model)
         # 言語オプションの状態も現在ロードされているモデルに合わせる
         if current_model == "Multilingual":
@@ -252,9 +282,13 @@ class App(ctk.CTk):
     def _generate_task(self, text, ref_path, lang):
         """音声生成タスク（ワーカースレッドで実行）"""
         try:
-            # モデルがロードされていない場合はデフォルト(Turbo)をロード
+            # モデルがロードされていない場合はデフォルト(Standard)をロード
             if self.engine.current_model is None:
                 self.engine.load_model(self.model_option.get(), self._update_progress)
+
+            # ユーザー辞書および正規化ツールのインポートと適用
+            from .utils import load_user_dict, apply_user_dict, normalize_english_text
+            rules = load_user_dict(self.user_dict_path)
 
             # 行（改行）ごとに分割
             raw_lines = [line.strip() for line in text.split("\n") if line.strip()]
@@ -263,8 +297,12 @@ class App(ctk.CTk):
             self.current_audio_segments = []
             
             for i, line in enumerate(raw_lines):
-                # 各行をさらに文単位で分割（長文エラー防止）
-                segments = split_text(line)
+                # テキスト正規化とユーザー辞書の適用
+                line_normalized = normalize_english_text(line)
+                line_processed = apply_user_dict(line_normalized, rules)
+
+                # 各行をさらに文単位で分割（長文エラー防止・最適長分割）
+                segments = split_text(line_processed)
                 line_tensors = []
                 
                 for seg in segments:
@@ -391,6 +429,10 @@ class App(ctk.CTk):
                 if self.engine.current_model is None:
                     self.engine.load_model(self.model_option.get(), self._update_progress)
                 
+                # ユーザー辞書および正規化ツールのインポートとロード
+                from .utils import load_user_dict, apply_user_dict, normalize_english_text
+                rules = load_user_dict(self.user_dict_path)
+
                 for i, filename in enumerate(files):
                     file_path = os.path.join(folder_path, filename)
                     with open(file_path, "r", encoding="utf-8") as f:
@@ -400,7 +442,11 @@ class App(ctk.CTk):
                     
                     self._update_progress(f"一括処理中 ({i+1}/{len(files)}): {filename}", (i / len(files)))
                     
-                    segments = split_text(text)
+                    # 正規化とユーザー辞書の適用
+                    text_normalized = normalize_english_text(text)
+                    text_processed = apply_user_dict(text_normalized, rules)
+
+                    segments = split_text(text_processed)
                     tensors = []
                     for seg in segments:
                         tensor = self.engine.generate(

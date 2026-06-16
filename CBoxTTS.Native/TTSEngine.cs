@@ -31,60 +31,80 @@ namespace CBoxTTS.Native
         // モデルごとのファイル定義
         private string GetLMFileName(ModelType type) => type switch
         {
-            ModelType.Turbo => "language_model_turbo_q4.onnx",
-            ModelType.English => "language_model_en_q4.onnx",
+            ModelType.Turbo => "language_model.onnx",
+            ModelType.English => "language_model.onnx",
             _ => "language_model_q4.onnx"
         };
 
-        private string GetLMDataFileName(ModelType type) => GetLMFileName(type) + "_data";
-
-        private string GetModelFileName(string baseName, ModelType type)
+        private string GetLMDataFileName(ModelType type) => type switch
         {
-            string suffix = type switch
-            {
-                ModelType.Turbo => "_turbo",
-                ModelType.English => "_en",
-                _ => "_mtl"
-            };
-            
-            if (baseName.EndsWith("_data"))
-            {
-                return baseName.Replace(".onnx_data", suffix + ".onnx_data");
-            }
-            if (baseName.EndsWith(".onnx"))
-            {
-                return baseName.Replace(".onnx", suffix + ".onnx");
-            }
-            if (baseName.EndsWith(".json"))
-            {
-                return baseName.Replace(".json", suffix + ".json");
-            }
-            return baseName;
-        }
+            ModelType.Turbo => "language_model.onnx_data",
+            ModelType.English => "language_model.onnx_data",
+            _ => GetLMFileName(type) + "_data"
+        };
 
-        private string GetBaseUrl(string fileName)
+        private string GetModelSubDir(ModelType type) => type switch
         {
-            if (fileName.Contains("turbo")) return "https://huggingface.co/onnx-community/chatterbox-turbo-ONNX/resolve/main/onnx/";
-            if (fileName.Contains("_en_")) return "https://huggingface.co/onnx-community/chatterbox-english-ONNX/resolve/main/onnx/";
-            return "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/main/onnx/";
-        }
+            ModelType.Turbo => "turbo",
+            ModelType.English => "english",
+            _ => "multilingual"
+        };
+
+        private string GetBaseUrl(ModelType type) => type switch
+        {
+            ModelType.Turbo => "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/main/onnx/",
+            ModelType.English => "https://huggingface.co/onnx-community/chatterbox-ONNX/resolve/main/onnx/",
+            _ => "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/main/onnx/"
+        };
 
 
         public TTSEngine(string baseDir)
         {
             _modelsDir = Path.Combine(baseDir, "models");
+            CleanupLegacyModels();
+        }
+
+        private void CleanupLegacyModels()
+        {
+            try
+            {
+                if (!Directory.Exists(_modelsDir)) return;
+
+                string[] legacyFiles = {
+                    "tokenizer.json", "tokenizer_mtl.json",
+                    "speech_encoder.onnx", "speech_encoder.onnx_data", "speech_encoder_mtl.onnx", "speech_encoder_mtl.onnx_data",
+                    "embed_tokens.onnx", "embed_tokens.onnx_data", "embed_tokens_mtl.onnx", "embed_tokens_mtl.onnx_data",
+                    "conditional_decoder.onnx", "conditional_decoder.onnx_data", "conditional_decoder_mtl.onnx", "conditional_decoder_mtl.onnx_data",
+                    "language_model_q4.onnx", "language_model_q4.onnx_data", "language_model.onnx", "language_model.onnx_data"
+                };
+
+                foreach (var file in legacyFiles)
+                {
+                    string path = Path.Combine(_modelsDir, file);
+                    if (File.Exists(path))
+                    {
+                        Log($"古いモデルファイルをクリーンアップします: {path}");
+                        File.Delete(path);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"古いモデルファイルのクリーンアップ中にエラーが発生しました: {ex.Message}");
+            }
         }
 
         public async Task EnsureModelExistsAsync(ModelType type, Action<string, double> progressCallback)
         {
-            if (!Directory.Exists(_modelsDir)) Directory.CreateDirectory(_modelsDir);
+            string subDir = Path.Combine(_modelsDir, GetModelSubDir(type));
+            if (!Directory.Exists(subDir)) Directory.CreateDirectory(subDir);
 
             var filesToDownload = new List<(string RemoteName, string LocalName)>();
             
-            // default_voice.wav は共通
-            filesToDownload.Add(("default_voice.wav", "default_voice.wav"));
+            // default_voice.wav は共通 (_modelsDir 直下)
+            filesToDownload.Add(("default_voice.wav", "../default_voice.wav"));
 
-            // その他のファイルはモデル固有の名前で保存・ダウンロード
+            // その他のファイルはモデル固有のフォルダへ元の名前のままダウンロード
             string[] baseFiles = {
                 "tokenizer.json",
                 "speech_encoder.onnx", "speech_encoder.onnx_data",
@@ -94,7 +114,7 @@ namespace CBoxTTS.Native
 
             foreach (var bf in baseFiles)
             {
-                filesToDownload.Add((bf, GetModelFileName(bf, type)));
+                filesToDownload.Add((bf, bf));
             }
 
             filesToDownload.Add((GetLMFileName(type), GetLMFileName(type)));
@@ -106,15 +126,15 @@ namespace CBoxTTS.Native
 
                 foreach (var item in filesToDownload)
                 {
-                    string localPath = Path.Combine(_modelsDir, item.LocalName);
+                    string localPath = Path.GetFullPath(Path.Combine(subDir, item.LocalName));
                     if (File.Exists(localPath)) continue;
 
-                    string baseUrl = GetBaseUrl(item.RemoteName);
+                    string baseUrl = GetBaseUrl(type);
                     string url = (item.RemoteName.EndsWith(".json") || item.RemoteName == "default_voice.wav")
                         ? baseUrl.Replace("/onnx/", "/") + item.RemoteName
                         : baseUrl + item.RemoteName;
 
-                    Log($"{item.LocalName} のダウンロードを開始します: {url}");
+                    Log($"{Path.GetFileName(localPath)} のダウンロードを開始します: {url}");
                     
                     using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
                     {
@@ -136,7 +156,7 @@ namespace CBoxTTS.Native
                                 await fileStream.WriteAsync(buffer, 0, read);
                                 totalRead += read;
                                 if (totalBytes > 0)
-                                    progressCallback?.Invoke($"{item.LocalName} をダウンロード中... ({(double)totalRead / totalBytes * 100:F1}%)", (double)totalRead / totalBytes * 100);
+                                    progressCallback?.Invoke($"{Path.GetFileName(localPath)} をダウンロード中... ({(double)totalRead / totalBytes * 100:F1}%)", (double)totalRead / totalBytes * 100);
                             }
                         }
                     }
@@ -151,35 +171,57 @@ namespace CBoxTTS.Native
             {
                 Dispose();
 
+                string subDir = Path.Combine(_modelsDir, GetModelSubDir(type));
                 string lmFile = GetLMFileName(type);
                 string[] baseModelFiles = { "speech_encoder.onnx", "embed_tokens.onnx", "conditional_decoder.onnx", lmFile };
                 
                 for (int i = 0; i < baseModelFiles.Length; i++)
                 {
                     string baseName = baseModelFiles[i];
-                    string m = (baseName == lmFile) ? lmFile : GetModelFileName(baseName, type);
-                    
                     double pct = (double)i / baseModelFiles.Length * 100;
                     progressCallback?.Invoke($"{baseName} をロード中... ({i+1}/{baseModelFiles.Length})", pct);
 
-                    string path = Path.Combine(_modelsDir, m);
-                    if (!File.Exists(path)) path = Path.Combine(AppContext.BaseDirectory, m);
+                    string path = Path.Combine(subDir, baseName);
+                    if (!File.Exists(path))
+                    {
+                        path = Path.Combine(AppContext.BaseDirectory, "models", GetModelSubDir(type), baseName);
+                    }
                     
-                    Log($"[Session開始] {m}");
+                    // ONNXモデルをロードする前に、GQA（GroupQueryAttention）の入力数パッチを自動適用
+                    if (File.Exists(path) && baseName.StartsWith("language_model") && baseName.EndsWith(".onnx"))
+                    {
+                        OnnxGqaPatcher.PatchModel(path);
+                    }
+                    
+                    Log($"[Session開始] {baseName} (Path: {path})");
                     
                     InferenceSession? session = null;
-                    try
+                    int retryCount = 5;
+                    while (retryCount > 0)
                     {
-                        // 動作の安定性を重視し、デフォルトでは CPU 推論を使用
-                        // (DirectML GPU加速が必要な場合はコメントアウトを解除し VRAM プレッシャー等に配慮すること)
-                        var cpuOptions = new SessionOptions();
-                        session = new InferenceSession(path, cpuOptions);
-                        Log($"[Session成功:CPU] {m}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"[ロード失敗] {m}: {ex.Message}");
-                        throw;
+                        try
+                        {
+                            var cpuOptions = new SessionOptions();
+                            session = new InferenceSession(path, cpuOptions);
+                            Log($"[Session成功:CPU] {baseName}");
+                            break;
+                        }
+                        catch (Exception ex) when (ex.Message.Contains("errcode = 32") || ex.Message.Contains("access") || ex.Message.Contains("locked") || ex.Message.Contains("使用中"))
+                        {
+                            retryCount--;
+                            if (retryCount == 0)
+                            {
+                                Log($"[ロード失敗] {baseName}: ファイルロックが解除されませんでした。 {ex.Message}");
+                                throw;
+                            }
+                            Log($"[ロード再試行] {baseName} がロックされています。1.5秒後にリトライします... (残り試行回数: {retryCount})");
+                            Task.Delay(1500).Wait();
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[ロード失敗] {baseName}: {ex.Message}");
+                            throw;
+                        }
                     }
                     
                     if (baseName.StartsWith("speech")) _speechEncoder = session;
@@ -279,10 +321,16 @@ namespace CBoxTTS.Native
 
                 var embedInputs = new List<NamedOnnxValue>
                 {
-                    NamedOnnxValue.CreateFromTensor("input_ids", inputIdsTensor),
-                    NamedOnnxValue.CreateFromTensor("position_ids", positionIdsTensor),
-                    NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor)
+                    NamedOnnxValue.CreateFromTensor("input_ids", inputIdsTensor)
                 };
+                if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                {
+                    embedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", positionIdsTensor));
+                }
+                if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                {
+                    embedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                }
                 
                 Log("テキスト埋め込み実行中...");
                 using var embedResults = _embedTokens.Run(embedInputs);
@@ -307,9 +355,17 @@ namespace CBoxTTS.Native
                 var currentMaskValues = Enumerable.Repeat(1L, totalSeqLen).ToArray();
                 var currentMask = new DenseTensor<long>(currentMaskValues, new[] { 1, currentMaskValues.Length });
 
-                // 過去のKey/Valueキャッシュ（30レイヤー分）の初期化
+                // past_key_values の入力ポート数をメタデータから判定 (例: past_key_values.X.key の最大インデックスを取得)
+                int numKvLayers = 0;
+                while (_languageModel.InputMetadata.ContainsKey($"past_key_values.{numKvLayers}.key"))
+                {
+                    numKvLayers++;
+                }
+                Log($"言語モデルのKVレイヤー数を検出しました: {numKvLayers} レイヤー");
+
+                // 過去のKey/Valueキャッシュの初期化
                 var pastKeyValues = new Dictionary<string, DenseTensor<float>>();
-                for (int i = 0; i < 30; i++)
+                for (int i = 0; i < numKvLayers; i++)
                 {
                     pastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
                     pastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
@@ -331,23 +387,42 @@ namespace CBoxTTS.Native
                         NamedOnnxValue.CreateFromTensor("inputs_embeds", currentEmbeds),
                         NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
                     };
-                    for (int i = 0; i < 30; i++)
+                    
+                    if (_languageModel.InputMetadata.ContainsKey("position_ids"))
                     {
-                        lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", pastKeyValues[$"past_key_values.{i}.key"]));
-                        lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", pastKeyValues[$"past_key_values.{i}.value"]));
+                        // 1ステップ目 (step == 0) の position_ids は arange(totalSeqLen) となる
+                        long[] posIds;
+                        if (step == 0)
+                        {
+                            posIds = new long[totalSeqLen];
+                            for (int p = 0; p < totalSeqLen; p++) posIds[p] = (long)p;
+                        }
+                        else
+                        {
+                            // 2ステップ目以降 (step > 0) は生成された最新1トークン分なので [ [totalSeqLen - 1] ]
+                            posIds = new long[] { (long)(totalSeqLen - 1) };
+                        }
+                        var posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
+                        lmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
                     }
 
-                    using var lmResults = _languageModel.Run(lmInputs);
-                    var logitsTensor = lmResults.First(o => o.Name == "logits").AsTensor<float>();
-
-                    // 次のステップ用にKVキャッシュを更新
-                    for (int i = 0; i < 30; i++)
-                    {
-                        var presentKey = lmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
-                        var presentVal = lmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
-                        pastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
-                        pastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
-                    }
+                     for (int i = 0; i < numKvLayers; i++)
+                     {
+                         lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", pastKeyValues[$"past_key_values.{i}.key"]));
+                         lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", pastKeyValues[$"past_key_values.{i}.value"]));
+                     }
+ 
+                     using var lmResults = _languageModel.Run(lmInputs);
+                     var logitsTensor = lmResults.First(o => o.Name == "logits").AsTensor<float>();
+ 
+                     // 次のステップ用にKVキャッシュを更新
+                     for (int i = 0; i < numKvLayers; i++)
+                     {
+                         var presentKey = lmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
+                         var presentVal = lmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
+                         pastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
+                         pastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
+                     }
 
                     // 最後のステップのLogitsを取得
                     int seqLen = logitsTensor.Dimensions[1];
@@ -398,16 +473,25 @@ namespace CBoxTTS.Native
                     
                     var nextEmbedInputs = new List<NamedOnnxValue>
                     {
-                        NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor),
-                        NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor),
-                        NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor)
+                        NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
                     };
+                    if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                    {
+                        nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor));
+                    }
+                    if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                    {
+                        nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                    }
                     using var nextEmbedResults = _embedTokens.Run(nextEmbedInputs);
                     currentEmbeds = CloneTensor(nextEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
 
                     // アテンションマスクを拡張
                     var newMaskValues = currentMask.ToArray().Concat(new[] { 1L }).ToArray();
                     currentMask = new DenseTensor<long>(newMaskValues, new[] { 1, newMaskValues.Length });
+
+                    // 言語モデルにposition_idsの入力が必要な場合、現在のシーケンス長をインクリメント
+                    totalSeqLen++;
                 }
 
                 // speech_tokens の組み立て（リファレンス: generate_tokens[:, 1:-1] → START_SPEECH_TOKENと最後のSTOP_TOKENを除去）
@@ -462,17 +546,23 @@ namespace CBoxTTS.Native
         {
             Log("=== GenerateBatchAsync 開始 ===");
             
+            string normalizedText = fullText;
+            if (langToken == 708) // 英語 ([en] トークン, ID=708)
+            {
+                normalizedText = EnglishNormalizer.Normalize(fullText);
+            }
+
             // 句読点で分割（。、！？!?.）
-            var sentences = SplitSentences(fullText);
+            var sentences = SplitSentences(normalizedText);
             Log($"文分割結果: {sentences.Count} 文");
             
             if (sentences.Count <= 1)
             {
                 // 1文以下の場合はそのまま合成
-                string processedText = fullText;
+                string processedText = normalizedText;
                 if (langToken == 723) // 日本語
                 {
-                    var analysis = morph.Analyze(fullText);
+                    var analysis = morph.Analyze(normalizedText);
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
@@ -674,6 +764,282 @@ namespace CBoxTTS.Native
             _languageModel?.Dispose();
             _condDecoder?.Dispose();
             _embedTokens?.Dispose();
+        }
+    }
+
+    public class PbElement
+    {
+        public uint Tag { get; set; }
+        public int FieldNumber => (int)(Tag >> 3);
+        public int WireType => (int)(Tag & 7);
+
+        public ulong VarintVal { get; set; }
+        public ulong Fixed64Val { get; set; }
+        public uint Fixed32Val { get; set; }
+        public byte[]? RawBytes { get; set; }
+        public List<PbElement>? SubElements { get; set; }
+
+        public void WriteTo(Stream stream)
+        {
+            WriteVarint(stream, Tag);
+            switch (WireType)
+            {
+                case 0:
+                    WriteVarint(stream, VarintVal);
+                    break;
+                case 1:
+                    WriteFixed64(stream, Fixed64Val);
+                    break;
+                case 2:
+                    if (SubElements != null)
+                    {
+                        using (var ms = new MemoryStream())
+                        {
+                            foreach (var sub in SubElements)
+                            {
+                                sub.WriteTo(ms);
+                            }
+                            var bytes = ms.ToArray();
+                            WriteVarint(stream, (ulong)bytes.Length);
+                            stream.Write(bytes, 0, bytes.Length);
+                        }
+                    }
+                    else if (RawBytes != null)
+                    {
+                        WriteVarint(stream, (ulong)RawBytes.Length);
+                        stream.Write(RawBytes, 0, RawBytes.Length);
+                    }
+                    else
+                    {
+                        WriteVarint(stream, 0);
+                    }
+                    break;
+                case 5:
+                    WriteFixed32(stream, Fixed32Val);
+                    break;
+                default:
+                    throw new NotSupportedException($"Unsupported wire type: {WireType}");
+            }
+        }
+
+        private static void WriteVarint(Stream stream, ulong value)
+        {
+            while (value >= 0x80)
+            {
+                stream.WriteByte((byte)((value & 0x7F) | 0x80));
+                value >>= 7;
+            }
+            stream.WriteByte((byte)value);
+        }
+
+        private static void WriteFixed64(Stream stream, ulong value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        private static void WriteFixed32(Stream stream, uint value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+    }
+
+    public static class OnnxGqaPatcher
+    {
+        public static bool PatchModel(string filePath)
+        {
+            if (!File.Exists(filePath)) return false;
+
+            byte[] modelData;
+            try
+            {
+                modelData = File.ReadAllBytes(filePath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reading ONNX file for patch: {ex.Message}");
+                return false;
+            }
+
+            try
+            {
+                using (var ms = new MemoryStream(modelData))
+                {
+                    // 1. ModelProto (ルート) をフラットにパース
+                    var elements = ParseElements(ms);
+
+                    bool patched = false;
+                    foreach (var elem in elements)
+                    {
+                        // ModelProto において、graph は field 7 (wire type 2)
+                        if (elem.FieldNumber == 7 && elem.WireType == 2 && elem.RawBytes != null)
+                        {
+                            // 2. GraphProto をフラットにパース
+                            using (var graphMs = new MemoryStream(elem.RawBytes))
+                            {
+                                elem.SubElements = ParseElements(graphMs);
+                                elem.RawBytes = null;
+
+                                foreach (var nodeElem in elem.SubElements)
+                                {
+                                    // GraphProto において、node は field 1 (wire type 2)
+                                    if (nodeElem.FieldNumber == 1 && nodeElem.WireType == 2 && nodeElem.RawBytes != null)
+                                    {
+                                        // 3. NodeProto をフラットにパース (子は一切サブパースしない)
+                                        using (var nodeMs = new MemoryStream(nodeElem.RawBytes))
+                                        {
+                                            nodeElem.SubElements = ParseElements(nodeMs);
+                                            nodeElem.RawBytes = null;
+
+                                            PbElement? opTypeElem = null;
+                                            var inputElems = new List<PbElement>();
+
+                                            foreach (var child in nodeElem.SubElements)
+                                            {
+                                                if (child.FieldNumber == 4 && child.WireType == 2) // op_type
+                                                {
+                                                    opTypeElem = child;
+                                                }
+                                                else if (child.FieldNumber == 1 && child.WireType == 2) // input
+                                                {
+                                                    inputElems.Add(child);
+                                                }
+                                            }
+
+                                            if (opTypeElem != null && opTypeElem.RawBytes != null)
+                                            {
+                                                string opType = Encoding.ASCII.GetString(opTypeElem.RawBytes);
+                                                if (opType == "GroupQueryAttention" && inputElems.Count == 11)
+                                                {
+                                                    // 最後の2つの入力を削除
+                                                    var toRemove9 = inputElems[9];
+                                                    var toRemove10 = inputElems[10];
+                                                    nodeElem.SubElements.Remove(toRemove10);
+                                                    nodeElem.SubElements.Remove(toRemove9);
+                                                    patched = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (patched)
+                    {
+                        using (var outMs = new MemoryStream())
+                        {
+                            foreach (var elem in elements)
+                            {
+                                elem.WriteTo(outMs);
+                            }
+                            File.WriteAllBytes(filePath, outMs.ToArray());
+                        }
+                        Console.WriteLine($"C# GQA PATCH SUCCESS: {Path.GetFileName(filePath)}");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error patching ONNX file: {ex.Message}");
+            }
+
+            return false;
+        }
+
+        private static List<PbElement> ParseElements(Stream stream)
+        {
+            var list = new List<PbElement>();
+            while (stream.Position < stream.Length)
+            {
+                long pos = stream.Position;
+                uint tag;
+                try
+                {
+                    tag = (uint)ReadVarint(stream);
+                }
+                catch (EndOfStreamException)
+                {
+                    break;
+                }
+
+                if (tag == 0) break;
+
+                var elem = new PbElement { Tag = tag };
+                switch (elem.WireType)
+                {
+                    case 0: // Varint
+                        elem.VarintVal = ReadVarint(stream);
+                        break;
+                    case 1: // Fixed64
+                        elem.Fixed64Val = ReadFixed64(stream);
+                        break;
+                    case 2: // Length-delimited
+                        ulong len = ReadVarint(stream);
+                        byte[] bytes = new byte[(int)len];
+                        try
+                        {
+                            ReadExactly(stream, bytes, bytes.Length);
+                        }
+                        catch (EndOfStreamException)
+                        {
+                            Console.WriteLine($"[PARSE_ERROR] Field={elem.FieldNumber}, Wire=2, Len={len} at pos {pos}. Stream remaining={stream.Length - stream.Position}");
+                            throw;
+                        }
+                        elem.RawBytes = bytes;
+                        break;
+                    case 5: // Fixed32
+                        elem.Fixed32Val = ReadFixed32(stream);
+                        break;
+                    default:
+                        throw new NotSupportedException($"Unsupported wire type: {elem.WireType} at pos {pos}");
+                }
+                list.Add(elem);
+            }
+            return list;
+        }
+
+        private static void ReadExactly(Stream stream, byte[] buffer, int count)
+        {
+            int offset = 0;
+            while (offset < count)
+            {
+                int read = stream.Read(buffer, offset, count - offset);
+                if (read <= 0) throw new EndOfStreamException($"Unexpected end of stream. Required: {count}, Read: {offset}");
+                offset += read;
+            }
+        }
+
+        private static ulong ReadVarint(Stream stream)
+        {
+            ulong result = 0;
+            int shift = 0;
+            while (true)
+            {
+                int b = stream.ReadByte();
+                if (b == -1) throw new EndOfStreamException();
+                result |= (ulong)(b & 0x7F) << shift;
+                if ((b & 0x80) == 0) break;
+                shift += 7;
+            }
+            return result;
+        }
+
+        private static ulong ReadFixed64(Stream stream)
+        {
+            byte[] bytes = new byte[8];
+            ReadExactly(stream, bytes, bytes.Length);
+            return BitConverter.ToUInt64(bytes, 0);
+        }
+
+        private static uint ReadFixed32(Stream stream)
+        {
+            byte[] bytes = new byte[4];
+            ReadExactly(stream, bytes, bytes.Length);
+            return BitConverter.ToUInt32(bytes, 0);
         }
     }
 }

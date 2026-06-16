@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace CBoxTTS.Native
@@ -13,8 +14,8 @@ namespace CBoxTTS.Native
         private const long JaToken = 723;
         private const long StopToken = 0;
         
-        // embed_tokens.onnx の入力対応インデックス境界は [0, 2351] のため、これを上限とする
-        private const long MaxValidTokenId = 2351; 
+        // embed_tokens.onnx の入力対応インデックス境界は [0, 2453] のため、これを上限とする
+        private const long MaxValidTokenId = 2453;
 
         public Tokenizer(string jsonPath)
         {
@@ -43,23 +44,53 @@ namespace CBoxTTS.Native
                 _vocab.Clear();
                 foreach (var property in vocabElement.EnumerateObject())
                 {
-                    _vocab[property.Name] = property.Value.GetInt64();
+                    try
+                    {
+                        _vocab[property.Name] = property.Value.GetInt64();
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException($"vocabのキー '{property.Name}' (ValueKind: {property.Value.ValueKind}) のパースに失敗しました。", ex);
+                    }
                 }
                 Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}");
 
                 _merges.Clear();
                 if (doc.RootElement.GetProperty("model").TryGetProperty("merges", out var mergesElement))
                 {
-                    foreach (var item in mergesElement.EnumerateArray())
+                    if (mergesElement.ValueKind == JsonValueKind.Array)
                     {
-                        var rule = item.GetString();
-                        if (rule != null)
+                        int idx = 0;
+                        foreach (var item in mergesElement.EnumerateArray())
                         {
-                            var parts = rule.Split(' ');
-                            if (parts.Length == 2)
+                            try
                             {
-                                _merges.Add((parts[0], parts[1]));
+                                if (item.ValueKind == JsonValueKind.String)
+                                {
+                                    var rule = item.GetString();
+                                    if (rule != null)
+                                    {
+                                        var parts = rule.Split(' ');
+                                        if (parts.Length == 2)
+                                        {
+                                            _merges.Add((parts[0], parts[1]));
+                                        }
+                                    }
+                                }
+                                else if (item.ValueKind == JsonValueKind.Array)
+                                {
+                                    var arr = item.EnumerateArray().ToArray();
+                                    if (arr.Length == 2 && arr[0].ValueKind == JsonValueKind.String && arr[1].ValueKind == JsonValueKind.String)
+                                    {
+                                        _merges.Add((arr[0].GetString() ?? "", arr[1].GetString() ?? ""));
+                                    }
+                                }
                             }
+                            catch (Exception ex)
+                            {
+                                throw new InvalidOperationException($"mergesのインデックス {idx} (ValueKind: {item.ValueKind}) のパースに失敗しました。", ex);
+                            }
+                            idx++;
                         }
                     }
                     Log($"マージルールのロードに成功しました。総ルール数: {_merges.Count}");
@@ -77,9 +108,18 @@ namespace CBoxTTS.Native
             Log($"=== Tokenizer.Encode 開始 ===");
             Log($"入力テキスト: \"{text}\", 言語トークンID: {languageToken}");
 
+            string processed = text;
+            if (languageToken == 708) // 英語 ([en] トークン, ID=708) の場合のみ適用
+            {
+                // 記号正規化 (punc_norm)
+                processed = PuncNorm(processed);
+                // 小文字化 (Python版の preprocess_text と揃える)
+                processed = processed.ToLowerInvariant();
+            }
+
             // NFD正規化 (日本語の濁音分解に必要)
-            string normalized = text.Normalize(System.Text.NormalizationForm.FormD);
-            Log($"NFD正規化後のテキスト: \"{normalized}\"");
+            string normalized = processed.Normalize(System.Text.NormalizationForm.FormD);
+            Log($"前処理・正規化後のテキスト: \"{normalized}\"");
 
             var ids = new List<long> { StartToken, languageToken };
             Log($"初期化トークン追加: StartToken({StartToken}), LanguageToken({languageToken})");
@@ -186,6 +226,51 @@ namespace CBoxTTS.Native
             Log($"=== Tokenizer.Encode 終了 ===");
 
             return result;
+        }
+
+        private string PuncNorm(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "You need to add some text for me to talk.";
+            }
+
+            // 余分なスペースの統合
+            var parts = text.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            string merged = string.Join(" ", parts);
+
+            // 記号の置換 (Python版 punc_norm 準拠)
+            var puncToReplace = new (string Old, string New)[]
+            {
+                ("...", ", "),
+                ("…", ", "),
+                (":", ","),
+                (" - ", ", "),
+                (";", ", "),
+                ("—", "-"),
+                ("–", "-"),
+                (" ,", ","),
+                ("“", "\""),
+                ("”", "\""),
+                ("‘", "'"),
+                ("’", "'")
+            };
+
+            foreach (var item in puncToReplace)
+            {
+                merged = merged.Replace(item.Old, item.New);
+            }
+
+            merged = merged.TrimEnd();
+
+            // 文末の記号チェック (文末になければピリオドを追加)
+            var sentenceEnders = new HashSet<char> { '.', '!', '?', '-', ',', '、', '，', '。', '？', '！' };
+            if (merged.Length > 0 && !sentenceEnders.Contains(merged[merged.Length - 1]))
+            {
+                merged += ".";
+            }
+
+            return merged;
         }
     }
 }

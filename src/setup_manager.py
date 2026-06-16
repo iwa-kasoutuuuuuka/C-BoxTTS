@@ -20,9 +20,11 @@ class SetupManager:
         if getattr(sys, 'frozen', False):
             # EXE実行時
             self.base_dir = os.path.dirname(sys.executable)
+            self.is_english = "EN" in os.path.basename(sys.executable)
         else:
             # スクリプト実行時
             self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.is_english = "en" in os.path.basename(sys.argv[0])
             
         self.python_dir = os.path.join(self.base_dir, "python_embeded")
         self.python_exe = os.path.join(self.python_dir, "python.exe")
@@ -81,7 +83,16 @@ class SetupManager:
 
                 # 2. pipのインストール
                 get_pip_path = os.path.join(self.base_dir, "get-pip.py")
-                if not os.path.exists(os.path.join(self.python_dir, "Scripts", "pip.exe")):
+                pip_ok = False
+                if os.path.exists(os.path.join(self.python_dir, "Scripts", "pip.exe")):
+                    try:
+                        subprocess.check_call([self.python_exe, "-c", "import pip"], 
+                                              creationflags=subprocess.CREATE_NO_WINDOW)
+                        pip_ok = True
+                    except:
+                        pass
+
+                if not pip_ok:
                     if os.path.exists(get_pip_path):
                         progress_update_callback("ローカルのget-pip.pyを使用します...", 0.3)
                     else:
@@ -91,10 +102,10 @@ class SetupManager:
                     subprocess.check_call([self.python_exe, get_pip_path], creationflags=subprocess.CREATE_NO_WINDOW)
                     if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
-                # 2.5 高速転送ライブラリの導入 (AIモデルのダウンロードを爆速にする)
-                progress_update_callback("高速転送ライブラリをセットアップ中...", 0.4)
+                # 2.5 高速転送ライブラリおよびビルドツールの導入 (ビルドに必要な setuptools と wheel も追加)
+                progress_update_callback("高速転送ライブラリおよびビルドツールをセットアップ中...", 0.4)
                 subprocess.check_call([
-                    self.python_exe, "-m", "pip", "install", "--no-cache-dir", "hf_transfer"
+                    self.python_exe, "-m", "pip", "install", "--no-cache-dir", "hf_transfer", "setuptools==75.0.0", "wheel"
                 ], creationflags=subprocess.CREATE_NO_WINDOW)
 
                 # 3. ライブラリのインストール
@@ -118,12 +129,16 @@ class SetupManager:
                     ], creationflags=subprocess.CREATE_NO_WINDOW)
 
                 progress_update_callback("その他のライブラリをインストール中...", 0.8)
-                subprocess.check_call([
+                target_packages = ["chatterbox-tts", "transformers", "diffusers", "librosa", "customtkinter", "pygame"]
+                if not self.is_english:
+                    target_packages.extend(["pykakasi", "sudachipy"])
+                
+                cmd = [
                     self.python_exe, "-m", "pip", "install", "--no-cache-dir",
-                    "--find-links", package_dir,
-                    "chatterbox-tts", "transformers", "diffusers", "librosa", 
-                    "pykakasi", "sudachipy", "customtkinter", "pygame"
-                ], creationflags=subprocess.CREATE_NO_WINDOW)
+                    "--find-links", package_dir
+                ] + target_packages
+                
+                subprocess.check_call(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
                 
                 # クリーンアップ（__pycache__の削除など）
                 progress_update_callback("クリーンアップを実行中...", 0.9)

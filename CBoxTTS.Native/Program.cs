@@ -41,8 +41,8 @@ namespace CBoxTTS.Native
             string dicDir = Path.Combine(baseDir, "dic");
             string voicePath = Path.Combine(modelsDir, "default_voice.wav");
 
-            Console.WriteLine("Starting Test Harness (Console Mode)...");
-            File.WriteAllText("test_harness.log", $"[{DateTime.Now}] Starting Test Harness...{Environment.NewLine}");
+            Console.WriteLine("Starting Extended Test Harness (Console Mode)...");
+            File.WriteAllText("test_harness.log", $"[{DateTime.Now}] Starting Extended Test Harness...{Environment.NewLine}");
 
             Console.WriteLine($"Loading MorphemeEngine from: {dicDir}");
             using var morph = new MorphemeEngine(baseDir);
@@ -50,66 +50,98 @@ namespace CBoxTTS.Native
 
             Console.WriteLine("Initializing TTSEngine...");
             using var engine = new TTSEngine(baseDir);
-            await engine.EnsureModelExistsAsync(ModelType.Multilingual, (msg, pct) => {
-                Console.WriteLine($"  [Download] {msg} ({pct:F1}%)");
-            });
 
-            Console.WriteLine($"Loading Tokenizer from: {modelsDir}");
-            var tokenizer = new Tokenizer(Path.Combine(modelsDir, "tokenizer_mtl.json"));
-
-            Console.WriteLine("Loading TTSEngine models...");
-            engine.LoadModel(ModelType.Multilingual, (msg, pct) => {
-                Console.WriteLine($"  [Load] {msg} ({pct:F1}%)");
-                File.AppendAllText("test_harness.log", $"  [Load] {msg} ({pct:F1}%){Environment.NewLine}");
-            });
-
-            // ==================== 1. 日本語テスト ====================
+            // ==================== 1. Multilingual モデルテスト (日本語 & 英語) ====================
             {
+                Console.WriteLine("\n--- 1. Testing Multilingual Model ---");
+                File.AppendAllText("test_harness.log", $"{Environment.NewLine}--- 1. Testing Multilingual Model ---{Environment.NewLine}");
+
+                await engine.EnsureModelExistsAsync(ModelType.Multilingual, (msg, pct) => {
+                    Console.WriteLine($"  [Download] {msg} ({pct:F1}%)");
+                });
+
+                var tokenizer = new Tokenizer(Path.Combine(modelsDir, "multilingual", "tokenizer.json"));
+
+                Console.WriteLine("Loading Multilingual models...");
+                engine.LoadModel(ModelType.Multilingual, (msg, pct) => {
+                    Console.WriteLine($"  [Load] {msg} ({pct:F1}%)");
+                });
+
+                // 日本語
                 string textJa = "せかいはかくのほのおにつつまれた。だがじんるいはぜつめつしてはいなかった。";
                 Console.WriteLine($"[JA Test] Input: {textJa}");
-                File.AppendAllText("test_harness.log", $"[JA Test] Input: {textJa}{Environment.NewLine}");
-
-                long langTokenJa = 723;
-                Console.WriteLine("[JA Test] Generating audio...");
-                File.AppendAllText("test_harness.log", $"[JA Test] Generating audio...{Environment.NewLine}");
                 float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
-                    morph, tokenizer, langTokenJa, msg => Console.WriteLine($"  [JA Status] {msg}"));
-
-                Console.WriteLine($"[JA Test] Generated! Samples: {wavJa.Length}");
-                File.AppendAllText("test_harness.log", $"[JA Test] Generated! Samples: {wavJa.Length}{Environment.NewLine}");
-
+                    morph, tokenizer, 723, msg => Console.WriteLine($"  [JA Status] {msg}"));
+                
                 string outPathJa = Path.Combine(baseDir, "test_harness_japanese_out.wav");
-                using (var audio = new AudioEngine())
-                {
-                    audio.SaveWav(wavJa, outPathJa);
-                }
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
                 Console.WriteLine($"[JA Test] Saved to: {outPathJa}");
-                File.AppendAllText("test_harness.log", $"[JA Test] Saved to: {outPathJa}{Environment.NewLine}");
-            }
 
-            // ==================== 2. 英語テスト ====================
-            {
-                string textEn = "The quick brown fox jumps over the lazy dog. Voice synthesis is working beautifully.";
+                // 英語
+                string textEn = "It works beautifully on multilingual model!";
                 Console.WriteLine($"[EN Test] Input: {textEn}");
-                File.AppendAllText("test_harness.log", $"[EN Test] Input: {textEn}{Environment.NewLine}");
-
-                long langTokenEn = 1007;
-                Console.WriteLine("[EN Test] Generating audio...");
-                File.AppendAllText("test_harness.log", $"[EN Test] Generating audio...{Environment.NewLine}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
-                    morph, tokenizer, langTokenEn, msg => Console.WriteLine($"  [EN Status] {msg}"));
-
-                Console.WriteLine($"[EN Test] Generated! Samples: {wavEn.Length}");
-                File.AppendAllText("test_harness.log", $"[EN Test] Generated! Samples: {wavEn.Length}{Environment.NewLine}");
+                    morph, tokenizer, 708, msg => Console.WriteLine($"  [EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_out.wav");
-                using (var audio = new AudioEngine())
-                {
-                    audio.SaveWav(wavEn, outPathEn);
-                }
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }
                 Console.WriteLine($"[EN Test] Saved to: {outPathEn}");
-                File.AppendAllText("test_harness.log", $"[EN Test] Saved to: {outPathEn}{Environment.NewLine}");
             }
+
+            // ==================== 2. Turbo モデルテスト (日本語専用) ====================
+            {
+                Console.WriteLine("\n--- 2. Testing Turbo Model ---");
+                File.AppendAllText("test_harness.log", $"{Environment.NewLine}--- 2. Testing Turbo Model ---{Environment.NewLine}");
+
+                await engine.EnsureModelExistsAsync(ModelType.Turbo, (msg, pct) => {
+                    Console.WriteLine($"  [Download] {msg} ({pct:F1}%)");
+                });
+
+                var tokenizer = new Tokenizer(Path.Combine(modelsDir, "turbo", "tokenizer.json"));
+
+                Console.WriteLine("Loading Turbo models...");
+                engine.LoadModel(ModelType.Turbo, (msg, pct) => {
+                    Console.WriteLine($"  [Load] {msg} ({pct:F1}%)");
+                });
+
+                string textJa = "ターボモデルのテストです。素早く合成が行われます。";
+                Console.WriteLine($"[Turbo JA Test] Input: {textJa}");
+                float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f,
+                    morph, tokenizer, 723, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
+
+                string outPathJa = Path.Combine(baseDir, "test_harness_turbo_japanese_out.wav");
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
+                Console.WriteLine($"[Turbo JA Test] Saved to: {outPathJa}");
+            }
+
+            // ==================== 3. English モデルテスト (英語専用) ====================
+            {
+                Console.WriteLine("\n--- 3. Testing English Model ---");
+                File.AppendAllText("test_harness.log", $"{Environment.NewLine}--- 3. Testing English Model ---{Environment.NewLine}");
+
+                await engine.EnsureModelExistsAsync(ModelType.English, (msg, pct) => {
+                    Console.WriteLine($"  [Download] {msg} ({pct:F1}%)");
+                });
+
+                var tokenizer = new Tokenizer(Path.Combine(modelsDir, "english", "tokenizer.json"));
+
+                Console.WriteLine("Loading English models...");
+                engine.LoadModel(ModelType.English, (msg, pct) => {
+                    Console.WriteLine($"  [Load] {msg} ({pct:F1}%)");
+                });
+
+                string textEn = "This is a test of the English exclusive model. Hello world!";
+                Console.WriteLine($"[English EN Test] Input: {textEn}");
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f,
+                    morph, tokenizer, 1, msg => Console.WriteLine($"  [English EN Status] {msg}"));
+
+                string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }
+                Console.WriteLine($"[English EN Test] Saved to: {outPathEn}");
+            }
+
+            Console.WriteLine("\n=== Extended Test Harness Finished Successfully ===");
+            File.AppendAllText("test_harness.log", $"{Environment.NewLine}=== Finished Successfully ==={Environment.NewLine}");
         }
     }
 }

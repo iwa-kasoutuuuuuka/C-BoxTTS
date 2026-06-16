@@ -1,6 +1,6 @@
-# C-Box TTS Japanese Edition Build Script (Simple & Stable)
+# C-Box TTS English Edition Build Script (Simple & Stable)
 
-$projectName = "C-BoxTTS"
+$projectName = "C-BoxTTS-EN"
 $distDir = "dist/$projectName"
 
 # 1. Cleanup
@@ -40,7 +40,7 @@ Write-Host "Building EXE..."
     --exclude-module llvmlite `
     --exclude-module matplotlib `
     --collect-all requests `
-    src/main.py
+    src/main_en.py
 
 # 3. Assets
 Write-Host "Copying assets..."

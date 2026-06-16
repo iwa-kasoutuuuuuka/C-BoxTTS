@@ -34,32 +34,15 @@ $sourceDic = "bin\Debug\net10.0-windows\win-x64\dic"
 
 if (Test-Path $sourceModels) {
     Write-Host "Copying models..."
-    Copy-Item -Path $sourceModels -Destination $fullOutputPath -Recurse -Force
-
-    # Generate offline copies with '_mtl' suffix to prevent HF downloads
     $targetModelsDir = Join-Path $fullOutputPath "models"
-    $baseFiles = "speech_encoder.onnx", "speech_encoder.onnx_data", "embed_tokens.onnx", "embed_tokens.onnx_data", "conditional_decoder.onnx", "conditional_decoder.onnx_data", "tokenizer.json"
-    foreach ($bf in $baseFiles) {
-        $srcFile = Join-Path $targetModelsDir $bf
-        if (Test-Path $srcFile) {
-            if ($bf.EndsWith(".onnx_data")) {
-                $dstName = $bf.Replace(".onnx_data", "_mtl.onnx_data")
-            } else {
-                $ext = [System.IO.Path]::GetExtension($bf)
-                $nameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($bf)
-                $dstName = $nameWithoutExt + "_mtl" + $ext
-            }
-            $dstFile = Join-Path $targetModelsDir $dstName
-            if (!(Test-Path $dstFile)) {
-                Write-Host "Generating local offline copy: $dstName"
-                Copy-Item -Path $srcFile -Destination $dstFile -Force
-            }
-        }
-    }
+    if (Test-Path $targetModelsDir) { Remove-Item -Path $targetModelsDir -Recurse -Force }
+    Copy-Item -Path $sourceModels -Destination $fullOutputPath -Recurse -Force
 }
 
 if (Test-Path $sourceDic) {
     Write-Host "Copying dictionary..."
+    $targetDicDir = Join-Path $fullOutputPath "dic"
+    if (Test-Path $targetDicDir) { Remove-Item -Path $targetDicDir -Recurse -Force }
     Copy-Item -Path $sourceDic -Destination $fullOutputPath -Recurse -Force
 }
 

@@ -55,3 +55,8 @@ Thumbs.db
 install_log.txt
 python_embeded/
 C-BoxTTS_Portable/
+
+# Local custom paths
+build-debug/
+dist-debug/
+scratch/

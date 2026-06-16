@@ -1,0 +1,7 @@
+# C-Box TTS User Dictionary (English Edition)
+# Format: Word,Read
+# Lines starting with # are comments.
+# Examples:
+# AI,Artificial Intelligence
+# ChatGPT,Chat Gee Pee Tee
+# TTS,Text To Speech

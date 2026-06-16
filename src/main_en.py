@@ -68,8 +68,8 @@ def run_app():
             if os.path.exists(dll_dir):
                 os.add_dll_directory(dll_dir)
     
-    # 本番アプリのインポート
-    from src.gui import App
+    # 本番アプリのインポート（英語特化版のGUIをロード）
+    from src.gui_en import App
     app = App()
     app.mainloop()
 

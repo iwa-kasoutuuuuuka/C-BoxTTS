@@ -6,6 +6,7 @@ customtkinter
 
 # TTS Engine
 chatterbox-tts
+transformers==5.2.0
 huggingface_hub
 
 # Audio & Tensors
