@@ -402,42 +402,18 @@ namespace CBoxTTS.Native
                 Log($"cond_emb結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, totalSeqLen={totalSeqLen}");
 
                 // CFG（Classifier-Free Guidance）用の無条件埋め込みを準備
-                // 無条件パス: cond_emb + 空テキスト（START_TOKENの1個）で推論する
+                // 無条件パス: cond_emb + ゼロクリアされたテキスト埋め込み で推論する（リファレンス準拠）
                 bool useCfg = cfgWeight > 0.01f && cfgWeight < 1.0f;
                 DenseTensor<float>? uncondEmbeds = null;
-                int uncondSeqLen = condSeqLen + 1; // cond_emb + START_TOKEN (1個)
+                int uncondSeqLen = totalSeqLen; // 条件付きパスと完全に同一
                 if (useCfg)
                 {
-                    // 無条件パス用: cond_emb + [START_TOKEN] の埋め込み
-                    const long START_TOKEN = 255L;
-                    var uncondTokens = new long[] { START_TOKEN };
-                    var uncondTokensTensor = new DenseTensor<long>(uncondTokens, new[] { 1, uncondTokens.Length });
-                    
-                    var uncondEmbedInputs = new List<NamedOnnxValue>
-                    {
-                        NamedOnnxValue.CreateFromTensor("input_ids", uncondTokensTensor)
-                    };
-                    if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
-                    {
-                        var uncondPos = new long[uncondTokens.Length];
-                        for (int p = 0; p < uncondTokens.Length; p++) uncondPos[p] = 0L; // 音声開始トークンの位置IDは0
-                        var uncondPosTensor = new DenseTensor<long>(uncondPos, new[] { 1, uncondPos.Length });
-                        uncondEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", uncondPosTensor));
-                    }
-                    if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
-                    {
-                        uncondEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
-                    }
-                    
-                    using var uncondEmbedResults = _embedTokens.Run(uncondEmbedInputs);
-                    var uncondTextEmbed = uncondEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>().ToArray();
-
-                    // cond_emb + startSpeechToken埋め込みを結合
                     var uncondData = new float[uncondSeqLen * embedDim];
                     Array.Copy(condEmbData, 0, uncondData, 0, condSeqLen * embedDim);
-                    Array.Copy(uncondTextEmbed, 0, uncondData, condSeqLen * embedDim, uncondTokens.Length * embedDim);
+                    // 残りの領域（テキスト埋め込み部分）は、C# の float 配列生成時の初期値である 0 (ゼロ) のままとなるため、
+                    // これで「ゼロクリアされたテキスト埋め込み」と cond_emb の結合体が出来上がる
                     uncondEmbeds = new DenseTensor<float>(uncondData, new[] { 1, uncondSeqLen, embedDim });
-                    Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen}");
+                    Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen} (テキスト埋め込み領域を0クリアしました)");
                 }
                 else
                 {
@@ -492,6 +468,7 @@ namespace CBoxTTS.Native
                         NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
                     };
                     
+                    DenseTensor<long>? posTensor = null;
                     if (_languageModel.InputMetadata.ContainsKey("position_ids"))
                     {
                         // 1ステップ目 (step == 0) の position_ids は arange(totalSeqLen) となる
@@ -506,7 +483,7 @@ namespace CBoxTTS.Native
                             // 2ステップ目以降 (step > 0) は生成された最新1トークン分なので [ [totalSeqLen - 1] ]
                             posIds = new long[] { (long)(totalSeqLen - 1) };
                         }
-                        var posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
+                        posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
                         lmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
                     }
 
@@ -544,45 +521,17 @@ namespace CBoxTTS.Native
                     if (useCfg)
                     {
                         // 無条件パスの言語モデル入力を構築
-                        DenseTensor<float> uncondCurrentEmbeds;
-                        DenseTensor<long> uncondCurrentMask;
-                        if (step == 0)
-                        {
-                            // 初回: 無条件埋め込み全体を入力
-                            uncondCurrentEmbeds = uncondEmbeds!;
-                            var uncondMaskValues = Enumerable.Repeat(1L, uncondSeqLen).ToArray();
-                            uncondCurrentMask = new DenseTensor<long>(uncondMaskValues, new[] { 1, uncondMaskValues.Length });
-                        }
-                        else
-                        {
-                            // 2ステップ目以降: 前ステップで生成されたトークンの埋め込みのみを入力
-                            uncondCurrentEmbeds = currentEmbeds; // 条件付きパスと同じ次トークン埋め込み
-                            int uncondTotalLen = uncondSeqLen + step;
-                            var uncondMaskValues = Enumerable.Repeat(1L, uncondTotalLen).ToArray();
-                            uncondCurrentMask = new DenseTensor<long>(uncondMaskValues, new[] { 1, uncondMaskValues.Length });
-                        }
-
+                        DenseTensor<float> uncondCurrentEmbeds = (step == 0) ? uncondEmbeds! : currentEmbeds;
+                        // マスクと位置IDは条件付きパスと完全に同一なため、そのまま使い回す
                         var uncondLmInputs = new List<NamedOnnxValue>
                         {
                             NamedOnnxValue.CreateFromTensor("inputs_embeds", uncondCurrentEmbeds),
-                            NamedOnnxValue.CreateFromTensor("attention_mask", uncondCurrentMask)
+                            NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
                         };
 
-                        if (_languageModel.InputMetadata.ContainsKey("position_ids"))
+                        if (posTensor != null)
                         {
-                            long[] uncondPosIds;
-                            if (step == 0)
-                            {
-                                uncondPosIds = new long[uncondSeqLen];
-                                for (int p = 0; p < uncondSeqLen; p++) uncondPosIds[p] = (long)p;
-                            }
-                            else
-                            {
-                                int uncondTotalLen = uncondSeqLen + step;
-                                uncondPosIds = new long[] { (long)(uncondTotalLen - 1) };
-                            }
-                            var uncondPosTensor = new DenseTensor<long>(uncondPosIds, new[] { 1, uncondPosIds.Length });
-                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", uncondPosTensor));
+                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
                         }
 
                         for (int i = 0; i < numKvLayers; i++)
