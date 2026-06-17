@@ -388,35 +388,42 @@ namespace CBoxTTS.Native
                 Log($"cond_emb結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, totalSeqLen={totalSeqLen}");
 
                 // CFG（Classifier-Free Guidance）用の無条件埋め込みを準備
-                // 無条件パス: cond_emb のみ（テキスト埋め込みなし）で推論する
+                // 無条件パス: cond_emb + 空テキスト（StartToken + langToken）で推論する
                 bool useCfg = cfgWeight > 0.01f && cfgWeight < 1.0f;
                 DenseTensor<float>? uncondEmbeds = null;
-                int uncondSeqLen = condSeqLen + 1; // cond_emb + START_SPEECH_TOKEN分
+                int uncondSeqLen = condSeqLen + 2; // cond_emb + 空テキストトークン(2個)分
                 if (useCfg)
                 {
-                    // 無条件パス用: cond_emb + START_SPEECH_TOKEN の埋め込みのみ
-                    // START_SPEECH_TOKEN の埋め込みを取得
-                    var startTokenTensor = new DenseTensor<long>(new[] { START_SPEECH_TOKEN }, new[] { 1, 1 });
-                    var startEmbedInputs = new List<NamedOnnxValue>
+                    // 無条件パス用: cond_emb + [StartToken, langToken] の埋め込み
+                    // 空テキストに対するテキストエンコーダ出力を取得（安全なインデックスを使用）
+                    const long START_TOKEN = 255;
+                    long langToken = inputIds.Length > 1 ? inputIds[1] : 1L;
+                    var uncondTokens = new long[] { START_TOKEN, langToken };
+                    var uncondTokensTensor = new DenseTensor<long>(uncondTokens, new[] { 1, uncondTokens.Length });
+                    
+                    var uncondEmbedInputs = new List<NamedOnnxValue>
                     {
-                        NamedOnnxValue.CreateFromTensor("input_ids", startTokenTensor)
+                        NamedOnnxValue.CreateFromTensor("input_ids", uncondTokensTensor)
                     };
                     if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
                     {
-                        var startPosTensor = new DenseTensor<long>(new[] { 0L }, new[] { 1, 1 });
-                        startEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", startPosTensor));
+                        var uncondPos = new long[uncondTokens.Length];
+                        for (int p = 0; p < uncondTokens.Length; p++) uncondPos[p] = (long)(p - 1);
+                        var uncondPosTensor = new DenseTensor<long>(uncondPos, new[] { 1, uncondPos.Length });
+                        uncondEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", uncondPosTensor));
                     }
                     if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
                     {
-                        startEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                        uncondEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
                     }
-                    using var startEmbedResults = _embedTokens.Run(startEmbedInputs);
-                    var startEmbed = startEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>().ToArray();
+                    
+                    using var uncondEmbedResults = _embedTokens.Run(uncondEmbedInputs);
+                    var uncondTextEmbed = uncondEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>().ToArray();
 
-                    // cond_emb + START_SPEECH_TOKEN埋め込みを結合
+                    // cond_emb + 空テキスト埋め込みを結合
                     var uncondData = new float[uncondSeqLen * embedDim];
                     Array.Copy(condEmbData, 0, uncondData, 0, condSeqLen * embedDim);
-                    Array.Copy(startEmbed, 0, uncondData, condSeqLen * embedDim, embedDim);
+                    Array.Copy(uncondTextEmbed, 0, uncondData, condSeqLen * embedDim, uncondTokens.Length * embedDim);
                     uncondEmbeds = new DenseTensor<float>(uncondData, new[] { 1, uncondSeqLen, embedDim });
                     Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen}");
                 }
