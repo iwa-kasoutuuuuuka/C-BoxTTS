@@ -484,7 +484,7 @@ namespace CBoxTTS.Native
                 // 反復ペナルティ係数（リファレンス: repetition_penalty = 1.2）
                 const float repetitionPenalty = 1.2f;
 
-                int maxNewTokens = 400; // 安全のための最大トークン制限
+                int maxNewTokens = 760; // 安全のための最大トークン制限（英語長文でも途中打ち切りを防ぐ）
                 Log("自己回帰ループ開始...");
                 
                 for (int step = 0; step < maxNewTokens; step++)
@@ -717,17 +717,23 @@ namespace CBoxTTS.Native
                 normalizedText = EnglishNormalizer.Normalize(fullText);
             }
 
-            // 英語の場合、テキストが比較的短い（150文字以下）なら分割せずに1文として処理して流暢性を劇的に向上させる
+            // 英語の場合、テキストが比較的短い（350文字以下）なら分割せずに1文として処理して流暢性を劇的に向上させる
             bool isEnglish = (langToken == 708 || langToken == 1);
             List<string> sentences;
-            if (isEnglish && normalizedText.Length <= 150)
+            if (isEnglish && normalizedText.Length <= 350)
             {
                 sentences = new List<string> { normalizedText };
-                Log("英語テキストが150文字以下のため、分割せずに1つの文として合成します。");
+                Log("英語テキストが350文字以下のため、分割せずに1つの文として合成します。");
             }
             else
             {
                 sentences = SplitSentences(normalizedText);
+                // 英語の場合、短い文を前の文に結合してチャンク数を減らし流暢性を向上
+                if (isEnglish && sentences.Count > 1)
+                {
+                    sentences = MergeShortSentencesForEnglish(sentences, 350);
+                    Log($"英語文結合後: {sentences.Count} チャンク");
+                }
             }
             Log($"文分割結果: {sentences.Count} 文");
             
@@ -777,23 +783,31 @@ namespace CBoxTTS.Native
                 return new float[0];
             }
 
-            // 全波形を結合（チャンク間に短い無音を挿入）
-            // 英語は流れるようにスラスラ発音させるため、無音ギャップを極限まで短くする (0.03秒 @ 24kHz = 720サンプル)
-            int silenceGap = isEnglish ? 720 : 2400; 
-            int totalLength = 0;
-            foreach (var chunk in allWavChunks) totalLength += chunk.Length;
-            totalLength += (allWavChunks.Count - 1) * silenceGap;
-
-            var result = new float[totalLength];
-            int offset = 0;
-            for (int i = 0; i < allWavChunks.Count; i++)
+            // 全波形を結合
+            float[] result;
+            if (isEnglish)
             {
-                Array.Copy(allWavChunks[i], 0, result, offset, allWavChunks[i].Length);
-                offset += allWavChunks[i].Length;
-                if (i < allWavChunks.Count - 1)
+                // 英語: クロスフェード結合でスラスラと自然に接続
+                result = CrossfadeJoinChunks(allWavChunks, crossfadeSamples: 1200); // 50ms @ 24kHz
+            }
+            else
+            {
+                // 日本語: 従来通り無音ギャップで結合
+                int silenceGap = 2400;
+                int totalLength = 0;
+                foreach (var chunk in allWavChunks) totalLength += chunk.Length;
+                totalLength += (allWavChunks.Count - 1) * silenceGap;
+
+                result = new float[totalLength];
+                int offset = 0;
+                for (int i = 0; i < allWavChunks.Count; i++)
                 {
-                    // 無音ギャップ（0で埋め）
-                    offset += silenceGap;
+                    Array.Copy(allWavChunks[i], 0, result, offset, allWavChunks[i].Length);
+                    offset += allWavChunks[i].Length;
+                    if (i < allWavChunks.Count - 1)
+                    {
+                        offset += silenceGap;
+                    }
                 }
             }
 
@@ -963,6 +977,98 @@ namespace CBoxTTS.Native
             }
             
             return sentences.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        }
+
+        /// <summary>
+        /// 英語専用: 短い文を前の文に結合し、チャンク数を削減して流暢性を向上させる。
+        /// 各チャンクが maxChunkLength を超えない範囲で文を結合する。
+        /// </summary>
+        private List<string> MergeShortSentencesForEnglish(List<string> sentences, int maxChunkLength)
+        {
+            if (sentences.Count <= 1) return sentences;
+
+            var merged = new List<string>();
+            var current = new System.Text.StringBuilder();
+
+            foreach (var sentence in sentences)
+            {
+                if (current.Length == 0)
+                {
+                    current.Append(sentence);
+                }
+                else if (current.Length + 1 + sentence.Length <= maxChunkLength)
+                {
+                    // 結合してもチャンク上限内なら結合
+                    current.Append(" ");
+                    current.Append(sentence);
+                }
+                else
+                {
+                    // 上限を超えるなら現在のチャンクを確定し、新しいチャンクを開始
+                    merged.Add(current.ToString());
+                    current.Clear();
+                    current.Append(sentence);
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                merged.Add(current.ToString());
+            }
+
+            return merged;
+        }
+
+        /// <summary>
+        /// 複数の音声チャンクをクロスフェードで結合し、チャンク間の継ぎ目を自然にする。
+        /// 前のチャンクの末尾と次のチャンクの先頭を重ね合わせ、フェードアウト/フェードインで滑らかに遷移する。
+        /// </summary>
+        private float[] CrossfadeJoinChunks(List<float[]> chunks, int crossfadeSamples = 1200)
+        {
+            if (chunks.Count == 0) return Array.Empty<float>();
+            if (chunks.Count == 1) return chunks[0];
+
+            // 合計長を計算（クロスフェードによる重なり分を差し引く）
+            int totalLength = chunks[0].Length;
+            for (int i = 1; i < chunks.Count; i++)
+            {
+                int overlap = Math.Min(crossfadeSamples, Math.Min(chunks[i - 1].Length / 2, chunks[i].Length / 2));
+                totalLength += chunks[i].Length - overlap;
+            }
+
+            var result = new float[totalLength];
+            Array.Copy(chunks[0], 0, result, 0, chunks[0].Length);
+            int writePos = chunks[0].Length;
+
+            for (int c = 1; c < chunks.Count; c++)
+            {
+                float[] prev = chunks[c - 1];
+                float[] next = chunks[c];
+                int overlap = Math.Min(crossfadeSamples, Math.Min(prev.Length / 2, next.Length / 2));
+
+                // 書き込み位置を重なり分だけ戻す
+                writePos -= overlap;
+
+                // 重なり区間: 前チャンクのフェードアウト + 次チャンクのフェードイン
+                for (int i = 0; i < overlap; i++)
+                {
+                    float fadeOut = 1.0f - (float)i / overlap; // 前チャンク: 1.0→0.0
+                    float fadeIn = (float)i / overlap;          // 次チャンク: 0.0→1.0
+                    result[writePos + i] = result[writePos + i] * fadeOut + next[i] * fadeIn;
+                }
+
+                // 重なり区間以降の残りデータをコピー
+                int remaining = next.Length - overlap;
+                if (remaining > 0)
+                {
+                    Array.Copy(next, overlap, result, writePos + overlap, remaining);
+                }
+
+                writePos += next.Length;
+            }
+
+            Log($"クロスフェード結合完了: {chunks.Count} チャンク, 重なり {crossfadeSamples} サンプル (50ms), 合計 {totalLength} サンプル");
+            return result;
         }
 
         private static int Sample(float[] logits, float temperature, float topP, float minP, Random random)
