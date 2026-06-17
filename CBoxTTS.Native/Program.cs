@@ -265,7 +265,7 @@ namespace CBoxTTS.Native
 
                 string textEn = "This is a test of the English exclusive model. Hello world!";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
-                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.5f,
+                float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.8f,
                     morph, tokenizer, 1, 0.5f, msg => Console.WriteLine($"  [English EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");

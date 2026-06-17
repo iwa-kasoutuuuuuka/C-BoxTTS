@@ -15,8 +15,12 @@ Write-Host "--- 2. Packaging ---"
 $currentPath = Get-Location
 $fullOutputPath = Join-Path $currentPath $outputDirName
 
-if (Test-Path $fullOutputPath) { Remove-Item -Path $fullOutputPath -Recurse -Force }
-New-Item -ItemType Directory -Path $fullOutputPath -Force
+if (Test-Path $fullOutputPath) {
+    Write-Host "Keeping existing models folder if present..."
+    Get-ChildItem -Path $fullOutputPath | Where-Object { $_.Name -ne "models" } | Remove-Item -Recurse -Force
+} else {
+    New-Item -ItemType Directory -Path $fullOutputPath -Force
+}
 
 # Copy all files from publish (EXE, DLLs, etc.)
 Write-Host "Copying binaries and DLLs..."
@@ -31,21 +35,49 @@ Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.pdb") -ErrorAction 
 
 # Copy Models
 $sourceModels = "bin\Release_EN\net10.0-windows\win-x64\models"
+$fallbackModelsPaths = @(
+    "bin\Release\net10.0-windows\win-x64\models",
+    "bin\Debug\net10.0-windows\win-x64\models",
+    "..\models",
+    "models"
+)
+
 $targetModelsDir = Join-Path $fullOutputPath "models"
-New-Item -ItemType Directory -Path $targetModelsDir -Force
+if (-not (Test-Path $targetModelsDir)) {
+    New-Item -ItemType Directory -Path $targetModelsDir -Force
+}
+
+$actualSourceModels = $sourceModels
+if (-not (Test-Path $actualSourceModels)) {
+    foreach ($path in $fallbackModelsPaths) {
+        if (Test-Path $path) {
+            $actualSourceModels = $path
+            break
+        }
+    }
+}
+
+Write-Host "Using source models path: $actualSourceModels"
 
 Write-Host "Copying default voice prompt..."
-if (Test-Path "$sourceModels\default_voice.wav") {
-    Copy-Item -Path "$sourceModels\default_voice.wav" -Destination $targetModelsDir -Force
+if (Test-Path "$actualSourceModels\default_voice.wav") {
+    Copy-Item -Path "$actualSourceModels\default_voice.wav" -Destination $targetModelsDir -Force
 }
 
 # 英語版に必要なモデルのみをコピー (english, multilingual)
 $modelsToCopy = @("english", "multilingual")
 foreach ($model in $modelsToCopy) {
-    $srcModelPath = Join-Path $sourceModels $model
+    $srcModelPath = Join-Path $actualSourceModels $model
+    $targetModelPath = Join-Path $targetModelsDir $model
     if (Test-Path $srcModelPath) {
-        Write-Host "Copying model: $model..."
-        Copy-Item -Path $srcModelPath -Destination $targetModelsDir -Recurse -Force
+        if (-not (Test-Path $targetModelPath)) {
+            Write-Host "Copying model: $model..."
+            Copy-Item -Path $srcModelPath -Destination $targetModelsDir -Recurse -Force
+        } else {
+            Write-Host "Model $model already exists in output directory. Skipping copy."
+        }
+    } else {
+        Write-Host "Warning: Model source not found for $model at $srcModelPath"
     }
 }
 

@@ -393,16 +393,42 @@ namespace CBoxTTS.Native
                 int condSeqLen = condEmb.Dimensions[1];
                 int textSeqLen = inputsEmbeds.Dimensions[1];
                 int embedDim = inputsEmbeds.Dimensions[2];
-                int totalSeqLen = condSeqLen + textSeqLen;
+                // 音声開始トークン (startSpeechToken = 6561L) の埋め込みを取得して結合する (リファレンス準拠)
+                var bosTokens = new long[] { startSpeechToken };
+                var bosTokensTensor = new DenseTensor<long>(bosTokens, new[] { 1, bosTokens.Length });
+                var bosPos = new long[] { 0L };
+                var bosPosTensor = new DenseTensor<long>(bosPos, new[] { 1, bosPos.Length });
+                
+                var bosEmbedInputs = new List<NamedOnnxValue>
+                {
+                    NamedOnnxValue.CreateFromTensor("input_ids", bosTokensTensor)
+                };
+                if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                {
+                    bosEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", bosPosTensor));
+                }
+                if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                {
+                    bosEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                }
+                
+                Log("BOSトークン埋め込み実行中...");
+                using var bosEmbedResults = _embedTokens.Run(bosEmbedInputs);
+                var bosEmbed = CloneTensor(bosEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
+                var bosEmbedData = bosEmbed.ToArray();
+                int bosSeqLen = bosEmbed.Dimensions[1]; // 通常は 1
+                
+                int totalSeqLen = condSeqLen + textSeqLen + bosSeqLen;
                 
                 var combinedEmbeds = new float[totalSeqLen * embedDim];
                 Array.Copy(condEmbData, 0, combinedEmbeds, 0, condSeqLen * embedDim);
                 Array.Copy(inputsEmbedsData, 0, combinedEmbeds, condSeqLen * embedDim, textSeqLen * embedDim);
+                Array.Copy(bosEmbedData, 0, combinedEmbeds, (condSeqLen + textSeqLen) * embedDim, bosSeqLen * embedDim);
                 var currentEmbeds = new DenseTensor<float>(combinedEmbeds, new[] { 1, totalSeqLen, embedDim });
-                Log($"cond_emb結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, totalSeqLen={totalSeqLen}");
+                Log($"cond_emb + text_emb + bos_embed 結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, bosSeqLen={bosSeqLen}, totalSeqLen={totalSeqLen}");
 
                 // CFG（Classifier-Free Guidance）用の無条件埋め込みを準備
-                // 無条件パス: cond_emb + ゼロクリアされたテキスト埋め込み で推論する（リファレンス準拠）
+                // 無条件パス: cond_emb + ゼロクリアされたテキスト埋め込み + bos_embed で推論する（リファレンス準拠）
                 bool useCfg = cfgWeight > 0.01f && cfgWeight < 1.0f;
                 DenseTensor<float>? uncondEmbeds = null;
                 int uncondSeqLen = totalSeqLen; // 条件付きパスと完全に同一
@@ -410,17 +436,18 @@ namespace CBoxTTS.Native
                 {
                     var uncondData = new float[uncondSeqLen * embedDim];
                     Array.Copy(condEmbData, 0, uncondData, 0, condSeqLen * embedDim);
-                    // 残りの領域（テキスト埋め込み部分）は、C# の float 配列生成時の初期値である 0 (ゼロ) のままとなるため、
-                    // これで「ゼロクリアされたテキスト埋め込み」と cond_emb の結合体が出来上がる
+                    // テキスト埋め込み領域（condSeqLen から textSeqLen 長分）は 0.0f（ゼロクリア）のまま
+                    // 末尾の bos_embed 部分をコピー
+                    Array.Copy(bosEmbedData, 0, uncondData, (condSeqLen + textSeqLen) * embedDim, bosSeqLen * embedDim);
                     uncondEmbeds = new DenseTensor<float>(uncondData, new[] { 1, uncondSeqLen, embedDim });
-                    Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen} (テキスト埋め込み領域を0クリアしました)");
+                    Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen} (テキスト埋め込み領域を0クリア、BOS埋め込みを保持しました)");
                 }
                 else
                 {
                     Log($"CFG無効: cfg_weight={cfgWeight} (CFGなしで生成します)");
                 }
 
-                // アテンションマスクの初期化（cond_emb + テキスト長分）
+                // アテンションマスクの初期化（cond_emb + テキスト長 + BOSトークン分）
                 var currentMaskValues = Enumerable.Repeat(1L, totalSeqLen).ToArray();
                 var currentMask = new DenseTensor<long>(currentMaskValues, new[] { 1, currentMaskValues.Length });
 
@@ -560,11 +587,11 @@ namespace CBoxTTS.Native
                             uncondLogits[v] = uncondLogitsTensor[0, uncondSeqLenOut - 1, v];
                         }
 
-                        // CFG補間: final = uncond + cfg_weight * (cond - uncond)
+                        // CFG補間: final = cond + cfg_weight * (cond - uncond) (リファレンス準拠)
                         logits = new float[vocabSize];
                         for (int v = 0; v < vocabSize; v++)
                         {
-                            logits[v] = uncondLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
+                            logits[v] = condLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
                         }
                     }
                     else

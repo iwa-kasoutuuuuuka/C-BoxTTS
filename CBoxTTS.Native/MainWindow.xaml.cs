@@ -175,7 +175,7 @@ namespace CBoxTTS.Native
                 // モデルの種類に応じて TemperatureSlider のデフォルト値を自動セット
                 float defaultTemp = selectedType switch
                 {
-                    ModelType.English => 0.5f,
+                    ModelType.English => 0.8f,
                     ModelType.Turbo => 0.6f,
                     _ => 0.7f
                 };
