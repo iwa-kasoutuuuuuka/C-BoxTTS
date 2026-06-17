@@ -96,6 +96,19 @@ namespace CBoxTTS.Native
         {
             if (string.IsNullOrWhiteSpace(text)) return text;
 
+            if (!_userDictLoaded)
+            {
+                LoadUserDictionary(AppDomain.CurrentDomain.BaseDirectory);
+            }
+
+            // ユーザー辞書による完全一致および単語単位の置換 (単語境界 \b を考慮)
+            foreach (var kv in UserDictionary)
+            {
+                string escapedWord = Regex.Escape(kv.Key);
+                string pattern = $@"\b{escapedWord}\b";
+                text = Regex.Replace(text, pattern, kv.Value, RegexOptions.IgnoreCase);
+            }
+
             // 0. URL・メールアドレスの除去（TTSで発音不能なため）
             text = UrlRegex.Replace(text, "");
             text = EmailRegex.Replace(text, "");
@@ -401,6 +414,58 @@ namespace CBoxTTS.Native
             }
 
             return words.ToString().Trim();
+        }
+
+        private static readonly Dictionary<string, string> UserDictionary = new(StringComparer.OrdinalIgnoreCase);
+        private static bool _userDictLoaded = false;
+        private static readonly object _lock = new();
+
+        public static void LoadUserDictionary(string baseDir)
+        {
+            lock (_lock)
+            {
+                UserDictionary.Clear();
+                string path = System.IO.Path.Combine(baseDir, "user_dict_en.txt");
+                if (!System.IO.File.Exists(path))
+                {
+                    // 親ディレクトリも探索（デバッグ環境用）
+                    var parent = System.IO.Directory.GetParent(baseDir);
+                    if (parent != null)
+                    {
+                        path = System.IO.Path.Combine(parent.FullName, "user_dict_en.txt");
+                    }
+                }
+
+                if (System.IO.File.Exists(path))
+                {
+                    try
+                    {
+                        var lines = System.IO.File.ReadAllLines(path, Encoding.UTF8);
+                        foreach (var line in lines)
+                        {
+                            var trimmed = line.Trim();
+                            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+                                continue;
+
+                            var parts = trimmed.Split(',');
+                            if (parts.Length >= 2)
+                            {
+                                string word = parts[0].Trim();
+                                string read = parts[1].Trim();
+                                if (!string.IsNullOrEmpty(word))
+                                {
+                                    UserDictionary[word] = read;
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 失敗時は無視
+                    }
+                }
+                _userDictLoaded = true;
+            }
         }
     }
 }

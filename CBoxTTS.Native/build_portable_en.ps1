@@ -90,6 +90,13 @@ if (Test-Path $sourceAssets) {
     Copy-Item -Path $sourceAssets -Destination $fullOutputPath -Recurse -Force
 }
 
+# Copy User Dictionary (ユーザー辞書)
+$dictPath = "..\user_dict_en.txt"
+if (Test-Path $dictPath) {
+    Write-Host "Copying English user dictionary..."
+    Copy-Item -Path $dictPath -Destination (Join-Path $fullOutputPath "user_dict_en.txt") -Force
+}
+
 # Copy Specification (仕様書)
 $specPath = "..\ポータブル版仕様書_Native_EN.md"
 if (Test-Path $specPath) {
