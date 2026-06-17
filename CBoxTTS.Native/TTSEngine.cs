@@ -247,6 +247,17 @@ namespace CBoxTTS.Native
                     else if (baseName.StartsWith("conditional")) _condDecoder = session;
                     else _languageModel = session;
 
+                    Log($"[Metadata] {baseName} Inputs:");
+                    foreach (var input in session.InputMetadata)
+                    {
+                        Log($"  Input: {input.Key}, Shape: [{string.Join(",", input.Value.Dimensions)}]");
+                    }
+                    Log($"[Metadata] {baseName} Outputs:");
+                    foreach (var output in session.OutputMetadata)
+                    {
+                        Log($"  Output: {output.Key}, Shape: [{string.Join(",", output.Value.Dimensions)}]");
+                    }
+
                     progressCallback?.Invoke($"{baseName} ロード完了", (double)(i+1) / baseModelFiles.Length * 100);
                 }
                 
@@ -289,6 +300,10 @@ namespace CBoxTTS.Native
             {
                 Log("=== GenerateAsync 開始 ===");
                 var random = new Random(); // サンプリング用の乱数生成器（非固定シード）
+                
+                long startSpeechToken = 6561L;
+                long stopSpeechToken = 6562L;
+                Log($"開始トークン={startSpeechToken}, 終了トークン={stopSpeechToken} (モデルタイプ={_currentModelType})");
                 
                 // 1. 参照音声（ボイスプロンプト）のロード（24000Hz: リファレンス準拠 S3GEN_SR=24000）
                 float[] refAudio;
@@ -346,11 +361,10 @@ namespace CBoxTTS.Native
                 var inputIdsLong = inputIds.ToArray();
                 var inputIdsTensor = new DenseTensor<long>(inputIdsLong, new[] { 1, inputIdsLong.Length });
                 
-                const long START_SPEECH_TOKEN = 6561;
                 var positionIds = new long[inputIdsLong.Length];
                 for (int i = 0; i < inputIdsLong.Length; i++)
                 {
-                    positionIds[i] = inputIdsLong[i] >= START_SPEECH_TOKEN ? 0 : (long)(i - 1);
+                    positionIds[i] = inputIdsLong[i] >= startSpeechToken ? 0 : (long)(i - 1);
                 }
                 var positionIdsTensor = new DenseTensor<long>(positionIds, new[] { 1, positionIds.Length });
                 var exaggerationTensor = new DenseTensor<float>(new[] { exaggeration }, new[] { 1 });
@@ -388,17 +402,15 @@ namespace CBoxTTS.Native
                 Log($"cond_emb結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, totalSeqLen={totalSeqLen}");
 
                 // CFG（Classifier-Free Guidance）用の無条件埋め込みを準備
-                // 無条件パス: cond_emb + 空テキスト（StartToken + langToken）で推論する
+                // 無条件パス: cond_emb + 空テキスト（START_TOKENの1個）で推論する
                 bool useCfg = cfgWeight > 0.01f && cfgWeight < 1.0f;
                 DenseTensor<float>? uncondEmbeds = null;
-                int uncondSeqLen = condSeqLen + 2; // cond_emb + 空テキストトークン(2個)分
+                int uncondSeqLen = condSeqLen + 1; // cond_emb + START_TOKEN (1個)
                 if (useCfg)
                 {
-                    // 無条件パス用: cond_emb + [StartToken, langToken] の埋め込み
-                    // 空テキストに対するテキストエンコーダ出力を取得（安全なインデックスを使用）
-                    const long START_TOKEN = 255;
-                    long langToken = inputIds.Length > 1 ? inputIds[1] : 1L;
-                    var uncondTokens = new long[] { START_TOKEN, langToken };
+                    // 無条件パス用: cond_emb + [START_TOKEN] の埋め込み
+                    const long START_TOKEN = 255L;
+                    var uncondTokens = new long[] { START_TOKEN };
                     var uncondTokensTensor = new DenseTensor<long>(uncondTokens, new[] { 1, uncondTokens.Length });
                     
                     var uncondEmbedInputs = new List<NamedOnnxValue>
@@ -408,7 +420,7 @@ namespace CBoxTTS.Native
                     if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
                     {
                         var uncondPos = new long[uncondTokens.Length];
-                        for (int p = 0; p < uncondTokens.Length; p++) uncondPos[p] = (long)(p - 1);
+                        for (int p = 0; p < uncondTokens.Length; p++) uncondPos[p] = 0L; // 音声開始トークンの位置IDは0
                         var uncondPosTensor = new DenseTensor<long>(uncondPos, new[] { 1, uncondPos.Length });
                         uncondEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", uncondPosTensor));
                     }
@@ -420,7 +432,7 @@ namespace CBoxTTS.Native
                     using var uncondEmbedResults = _embedTokens.Run(uncondEmbedInputs);
                     var uncondTextEmbed = uncondEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>().ToArray();
 
-                    // cond_emb + 空テキスト埋め込みを結合
+                    // cond_emb + startSpeechToken埋め込みを結合
                     var uncondData = new float[uncondSeqLen * embedDim];
                     Array.Copy(condEmbData, 0, uncondData, 0, condSeqLen * embedDim);
                     Array.Copy(uncondTextEmbed, 0, uncondData, condSeqLen * embedDim, uncondTokens.Length * embedDim);
@@ -463,8 +475,8 @@ namespace CBoxTTS.Native
                     }
                 }
 
-                // generate_tokens の初期化（リファレンス: generate_tokens = np.array([[START_SPEECH_TOKEN]])）
-                var generateTokens = new List<long> { START_SPEECH_TOKEN };
+                // generate_tokens の初期化
+                var generateTokens = new List<long> { startSpeechToken };
                 
                 // 反復ペナルティ係数（リファレンス: repetition_penalty = 1.2）
                 const float repetitionPenalty = 1.2f;
@@ -631,10 +643,10 @@ namespace CBoxTTS.Native
                     // generate_tokens に追加
                     generateTokens.Add(nextToken);
 
-                    // 終了トークン（6562）の検出
-                    if (nextToken == 6562)
+                    // 終了トークンの検出
+                    if (nextToken == stopSpeechToken)
                     {
-                        Log($"終了トークンを検出しました。ステップ: {step}");
+                        Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
                         break;
                     }
 
@@ -673,15 +685,15 @@ namespace CBoxTTS.Native
 
                 // speech_tokens の組み立て（リファレンス: generate_tokens[:, 1:-1] → START_SPEECH_TOKENと最後のSTOP_TOKENを除去）
                 // generateTokens = [6561, token1, token2, ..., (6562 if stopped)]
-                var finalSpeechTokens = generateTokens.Skip(1).ToList(); // START_SPEECH_TOKEN をスキップ
-                if (finalSpeechTokens.Count > 0 && finalSpeechTokens.Last() == 6562)
+                var finalSpeechTokens = generateTokens.Skip(1).ToList(); // startSpeechToken をスキップ
+                if (finalSpeechTokens.Count > 0 && finalSpeechTokens.Last() == stopSpeechToken)
                 {
-                    finalSpeechTokens.RemoveAt(finalSpeechTokens.Count - 1); // STOP_SPEECH_TOKEN を除去
+                    finalSpeechTokens.RemoveAt(finalSpeechTokens.Count - 1); // stopSpeechToken を除去
                 }
                 
                 if (finalSpeechTokens.Count == 0)
                 {
-                    finalSpeechTokens.Add(START_SPEECH_TOKEN);
+                    finalSpeechTokens.Add(startSpeechToken);
                 }
                 Log($"自己回帰ループ完了。生成された音声トークン数: {finalSpeechTokens.Count}");
                 Log($"生成された先頭20個のトークン: [{string.Join(", ", finalSpeechTokens.Take(20))}]");

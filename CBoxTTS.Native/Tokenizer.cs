@@ -14,8 +14,8 @@ namespace CBoxTTS.Native
         private const long JaToken = 723;
         private const long StopToken = 0;
         
-        // embed_tokens.onnx の入力対応インデックス境界は [0, 2453] のため、これを上限とする
-        private const long MaxValidTokenId = 2453;
+        // embed_tokens.onnx の入力対応インデックス境界の上限。LoadVocab 時に動的に設定される。
+        private long _maxValidTokenId = 2453;
 
         public Tokenizer(string jsonPath)
         {
@@ -53,7 +53,11 @@ namespace CBoxTTS.Native
                         throw new InvalidOperationException($"vocabのキー '{property.Name}' (ValueKind: {property.Value.ValueKind}) のパースに失敗しました。", ex);
                     }
                 }
-                Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}");
+                if (_vocab.Count > 0)
+                {
+                    _maxValidTokenId = _vocab.Values.Max();
+                }
+                Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}, 動的モデル上限(MaxValidTokenId): {_maxValidTokenId}");
 
                 _merges.Clear();
                 if (doc.RootElement.GetProperty("model").TryGetProperty("merges", out var mergesElement))
@@ -186,9 +190,9 @@ namespace CBoxTTS.Native
                 {
                     if (_vocab.TryGetValue(sym, out long id))
                     {
-                        if (id > MaxValidTokenId)
+                        if (id > _maxValidTokenId)
                         {
-                            Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {MaxValidTokenId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
+                            Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {_maxValidTokenId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
                             id = 1;
                         }
                         else
