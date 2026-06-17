@@ -43,7 +43,6 @@
     <PackageReference Include="MeCab.DotNet" Version="0.0.40" Condition="'$(Configuration)' != 'Release_EN'" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
 </Project>

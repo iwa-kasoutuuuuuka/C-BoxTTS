@@ -45,6 +45,7 @@ namespace CBoxTTS.Native
             ExaggerationLabel.Text = "誇張度 (Exaggeration)";
             SpeedLabel.Text = "話速 (Speed)";
             TemperatureLabel.Text = "安定性 (Stability)";
+            CfgWeightLabel.Text = "CFG/ペース (CFG/Pace)";
             VoicePromptLabel.Text = "参照音声 (Voice Prompt)";
             
             WatermarkText.Text = "ここに読み上げたいテキストを入力してください...";
@@ -69,6 +70,7 @@ namespace CBoxTTS.Native
             ModelCombo.SelectedIndex = 0;
             
             TemperatureLabel.Text = "安定性 (Stability)";
+            CfgWeightLabel.Text = "CFG/ペース (CFG/Pace)";
             StatusText.Text = "初期化中...";
 #endif
         }
@@ -453,6 +455,27 @@ namespace CBoxTTS.Native
                 e.Handled = true;
             }
         }
+
+        private void CfgWeightText_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (double.TryParse(CfgWeightText.Text, out double val))
+            {
+                if (val < 0) val = 0;
+                if (val > 1) val = 1;
+                CfgWeightSlider.Value = val;
+            }
+            CfgWeightText.Text = CfgWeightSlider.Value.ToString("F2");
+        }
+
+        private void CfgWeightText_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                CfgWeightText_LostFocus(sender, e);
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+        }
         private void VoicePrompt_DragOver(object sender, DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -549,6 +572,14 @@ namespace CBoxTTS.Native
             string text = InputTextBox.Text;
             if (string.IsNullOrWhiteSpace(text)) return;
 
+            // 入力テキスト長の上限チェック（極端に長いテキストによるメモリ圧迫を防止）
+            const int MaxInputLength = 10000;
+            if (text.Length > MaxInputLength)
+            {
+                MessageBox.Show(GetMsg($"入力テキストが長すぎます。{MaxInputLength}文字以内にしてください。\n現在: {text.Length}文字", $"Input text is too long. Please limit to {MaxInputLength} characters.\nCurrent: {text.Length} characters"), GetMsg("警告", "Warning"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             try
             {
                 PlayButton.IsEnabled = false;
@@ -558,6 +589,7 @@ namespace CBoxTTS.Native
                 float exaggeration = (float)ExaggerationSlider.Value;
                 float speed = (float)SpeedSlider.Value;
                 float temperature = (float)TemperatureSlider.Value;
+                float cfgWeight = (float)CfgWeightSlider.Value;
                 string voicePath = VoicePromptPathText.Text;
                 
                 if (!Path.IsPathRooted(voicePath))
@@ -570,7 +602,7 @@ namespace CBoxTTS.Native
                 var wav = await Task.Run(async () =>
                 {
                     return await _engine!.GenerateBatchAsync(text, voicePath, exaggeration, temperature,
-                        _morph!, _tokenizer!, langToken, msg =>
+                        _morph!, _tokenizer!, langToken, cfgWeight, msg =>
                         {
                             Dispatcher.Invoke(() => StatusText.Text = msg);
                         });
@@ -595,10 +627,26 @@ namespace CBoxTTS.Native
 
         private async void SaveButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_isInitialized) return;
+            if (!_isInitialized)
+            {
+                MessageBox.Show(GetMsg("現在エンジンの初期化中です。しばらくお待ちください...", "Initializing engine. Please wait..."), GetMsg("初期化中", "Initializing"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
 
             string text = InputTextBox.Text;
-            if (string.IsNullOrWhiteSpace(text)) return;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                MessageBox.Show(GetMsg("読み上げたいテキストを入力してください。", "Please enter the text you want to read."), GetMsg("警告", "Warning"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // 入力テキスト長の上限チェック
+            const int MaxInputLength = 10000;
+            if (text.Length > MaxInputLength)
+            {
+                MessageBox.Show(GetMsg($"入力テキストが長すぎます。{MaxInputLength}文字以内にしてください。\n現在: {text.Length}文字", $"Input text is too long. Please limit to {MaxInputLength} characters.\nCurrent: {text.Length} characters"), GetMsg("警告", "Warning"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
             // 改行で分割して空行を除外
             var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
@@ -606,7 +654,11 @@ namespace CBoxTTS.Native
                             .Where(l => !string.IsNullOrEmpty(l))
                             .ToList();
 
-            if (lines.Count == 0) return;
+            if (lines.Count == 0)
+            {
+                MessageBox.Show(GetMsg("有効な読み上げテキストがありません。", "No valid text to read."), GetMsg("警告", "Warning"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
             var sfd = new SaveFileDialog
             {
@@ -625,6 +677,7 @@ namespace CBoxTTS.Native
                     float exaggeration = (float)ExaggerationSlider.Value;
                     float speed = (float)SpeedSlider.Value;
                     float temperature = (float)TemperatureSlider.Value;
+                    float cfgWeight = (float)CfgWeightSlider.Value;
                     string voicePath = VoicePromptPathText.Text;
                     
                     if (!Path.IsPathRooted(voicePath))
@@ -642,7 +695,7 @@ namespace CBoxTTS.Native
                         var wav = await Task.Run(async () =>
                         {
                             return await _engine!.GenerateBatchAsync(lines[0], voicePath, exaggeration, temperature,
-                                _morph!, _tokenizer!, langToken, msg =>
+                                _morph!, _tokenizer!, langToken, cfgWeight, msg =>
                                 {
                                     Dispatcher.Invoke(() => StatusText.Text = msg);
                                 });
@@ -666,7 +719,7 @@ namespace CBoxTTS.Native
                             var wav = await Task.Run(async () =>
                             {
                                 return await _engine!.GenerateBatchAsync(line, voicePath, exaggeration, temperature,
-                                    _morph!, _tokenizer!, langToken, msg =>
+                                    _morph!, _tokenizer!, langToken, cfgWeight, msg =>
                                     {
                                         Dispatcher.Invoke(() => StatusText.Text = $"{msg} ({i + 1}/{lines.Count})");
                                     });
@@ -703,6 +756,7 @@ namespace CBoxTTS.Native
         {
             _engine?.Dispose();
             _morph?.Dispose();
+            _audio?.Dispose();
             base.OnClosed(e);
         }
     }

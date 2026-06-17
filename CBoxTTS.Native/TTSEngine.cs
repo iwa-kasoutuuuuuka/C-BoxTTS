@@ -20,6 +20,7 @@ namespace CBoxTTS.Native
 
     public class TTSEngine : IDisposable
     {
+        private static readonly object _logLock = new object();
         private InferenceSession? _speechEncoder;
         private InferenceSession? _languageModel;
         private InferenceSession? _condDecoder;
@@ -122,6 +123,7 @@ namespace CBoxTTS.Native
 
             using (var client = new HttpClient())
             {
+                client.Timeout = TimeSpan.FromMinutes(10);
                 client.DefaultRequestHeaders.Add("User-Agent", "CBoxTTS-Native-Downloader");
 
                 foreach (var item in filesToDownload)
@@ -145,18 +147,34 @@ namespace CBoxTTS.Native
 
                         var totalBytes = response.Content.Headers.ContentLength ?? -1;
                         using (var contentStream = await response.Content.ReadAsStreamAsync())
-                        using (var fileStream = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                         {
-                            var buffer = new byte[8192];
-                            var totalRead = 0L;
-                            int read;
-
-                            while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) != 0)
+                            // 不完全ダウンロード保護: 一時ファイルに書き込み、完了後にリネーム
+                            string tempPath = localPath + ".tmp";
+                            try
                             {
-                                await fileStream.WriteAsync(buffer, 0, read);
-                                totalRead += read;
-                                if (totalBytes > 0)
-                                    progressCallback?.Invoke($"{Path.GetFileName(localPath)} をダウンロード中... ({(double)totalRead / totalBytes * 100:F1}%)", (double)totalRead / totalBytes * 100);
+                                using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                                {
+                                    var buffer = new byte[8192];
+                                    var totalRead = 0L;
+                                    int read;
+
+                                    while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) != 0)
+                                    {
+                                        await fileStream.WriteAsync(buffer, 0, read);
+                                        totalRead += read;
+                                        if (totalBytes > 0)
+                                            progressCallback?.Invoke($"{Path.GetFileName(localPath)} をダウンロード中... ({(double)totalRead / totalBytes * 100:F1}%)", (double)totalRead / totalBytes * 100);
+                                    }
+                                }
+                                // ダウンロード完了後にリネーム（アトミック操作）
+                                if (File.Exists(localPath)) File.Delete(localPath);
+                                File.Move(tempPath, localPath);
+                            }
+                            catch
+                            {
+                                // ダウンロード失敗時は不完全な一時ファイルを削除
+                                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                                throw;
                             }
                         }
                     }
@@ -215,7 +233,7 @@ namespace CBoxTTS.Native
                                 throw;
                             }
                             Log($"[ロード再試行] {baseName} がロックされています。1.5秒後にリトライします... (残り試行回数: {retryCount})");
-                            Task.Delay(1500).Wait();
+                            Thread.Sleep(1500);
                         }
                         catch (Exception ex)
                         {
@@ -248,7 +266,10 @@ namespace CBoxTTS.Native
             try
             {
                 string logPath = Path.Combine(AppContext.BaseDirectory, "debug.log");
-                File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+                lock (_logLock)
+                {
+                    File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+                }
                 Console.WriteLine(message);
             }
             catch { }
@@ -259,7 +280,7 @@ namespace CBoxTTS.Native
             return new DenseTensor<T>(src.ToArray(), src.Dimensions);
         }
 
-        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f, float temperature = 0.8f)
+        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f, float temperature = 0.8f, float cfgWeight = 0.5f)
         {
             if (_speechEncoder == null || _languageModel == null || _condDecoder == null || _embedTokens == null)
                 throw new InvalidOperationException("モデルがロードされていません。");
@@ -267,7 +288,7 @@ namespace CBoxTTS.Native
             return await Task.Run(() =>
             {
                 Log("=== GenerateAsync 開始 ===");
-                var random = new Random(42); // サンプリング用の乱数生成器
+                var random = new Random(); // サンプリング用の乱数生成器（非固定シード）
                 
                 // 1. 参照音声（ボイスプロンプト）のロード（24000Hz: リファレンス準拠 S3GEN_SR=24000）
                 float[] refAudio;
@@ -287,7 +308,22 @@ namespace CBoxTTS.Native
                         refAudio = buffer.ToArray();
                     }
                 }
-                Log($"参照音声ロード完了: {refAudio.Length} サンプル");
+                Log($"参照音声ロード完了: {refAudio.Length} サンプル ({(double)refAudio.Length / 24000:F2}秒)");
+
+                // 1b. 参照音声の前処理（無音トリム + 音量正規化 + 10秒制限）
+                refAudio = TrimSilence(refAudio, 0.01f);
+                refAudio = NormalizeAudioVolume(refAudio);
+                const int maxRefSamples = 24000 * 10; // 10秒制限
+                if (refAudio.Length > maxRefSamples)
+                {
+                    // 先頭10秒を切り出す（末尾よりも先頭の方が話者特徴が安定しやすい）
+                    refAudio = refAudio.Take(maxRefSamples).ToArray();
+                    Log($"参照音声を10秒に制限しました: {refAudio.Length} サンプル");
+                }
+                else
+                {
+                    Log($"参照音声前処理後: {refAudio.Length} サンプル ({(double)refAudio.Length / 24000:F2}秒)");
+                }
 
                 // 2. 音声エンコーダーの実行
                 var audioTensor = new DenseTensor<float>(refAudio, new[] { 1, refAudio.Length });
@@ -351,6 +387,44 @@ namespace CBoxTTS.Native
                 var currentEmbeds = new DenseTensor<float>(combinedEmbeds, new[] { 1, totalSeqLen, embedDim });
                 Log($"cond_emb結合完了: condSeqLen={condSeqLen}, textSeqLen={textSeqLen}, totalSeqLen={totalSeqLen}");
 
+                // CFG（Classifier-Free Guidance）用の無条件埋め込みを準備
+                // 無条件パス: cond_emb のみ（テキスト埋め込みなし）で推論する
+                bool useCfg = cfgWeight > 0.01f && cfgWeight < 1.0f;
+                DenseTensor<float>? uncondEmbeds = null;
+                int uncondSeqLen = condSeqLen + 1; // cond_emb + START_SPEECH_TOKEN分
+                if (useCfg)
+                {
+                    // 無条件パス用: cond_emb + START_SPEECH_TOKEN の埋め込みのみ
+                    // START_SPEECH_TOKEN の埋め込みを取得
+                    var startTokenTensor = new DenseTensor<long>(new[] { START_SPEECH_TOKEN }, new[] { 1, 1 });
+                    var startEmbedInputs = new List<NamedOnnxValue>
+                    {
+                        NamedOnnxValue.CreateFromTensor("input_ids", startTokenTensor)
+                    };
+                    if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                    {
+                        var startPosTensor = new DenseTensor<long>(new[] { 0L }, new[] { 1, 1 });
+                        startEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", startPosTensor));
+                    }
+                    if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                    {
+                        startEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                    }
+                    using var startEmbedResults = _embedTokens.Run(startEmbedInputs);
+                    var startEmbed = startEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>().ToArray();
+
+                    // cond_emb + START_SPEECH_TOKEN埋め込みを結合
+                    var uncondData = new float[uncondSeqLen * embedDim];
+                    Array.Copy(condEmbData, 0, uncondData, 0, condSeqLen * embedDim);
+                    Array.Copy(startEmbed, 0, uncondData, condSeqLen * embedDim, embedDim);
+                    uncondEmbeds = new DenseTensor<float>(uncondData, new[] { 1, uncondSeqLen, embedDim });
+                    Log($"CFG有効: cfg_weight={cfgWeight}, 無条件埋め込み長={uncondSeqLen}");
+                }
+                else
+                {
+                    Log($"CFG無効: cfg_weight={cfgWeight} (CFGなしで生成します)");
+                }
+
                 // アテンションマスクの初期化（cond_emb + テキスト長分）
                 var currentMaskValues = Enumerable.Repeat(1L, totalSeqLen).ToArray();
                 var currentMask = new DenseTensor<long>(currentMaskValues, new[] { 1, currentMaskValues.Length });
@@ -363,12 +437,23 @@ namespace CBoxTTS.Native
                 }
                 Log($"言語モデルのKVレイヤー数を検出しました: {numKvLayers} レイヤー");
 
-                // 過去のKey/Valueキャッシュの初期化
+                // 過去のKey/Valueキャッシュの初期化（条件付きパス）
                 var pastKeyValues = new Dictionary<string, DenseTensor<float>>();
                 for (int i = 0; i < numKvLayers; i++)
                 {
                     pastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
                     pastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                }
+
+                // CFG用の無条件パスKVキャッシュ
+                var uncondPastKeyValues = new Dictionary<string, DenseTensor<float>>();
+                if (useCfg)
+                {
+                    for (int i = 0; i < numKvLayers; i++)
+                    {
+                        uncondPastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                        uncondPastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                    }
                 }
 
                 // generate_tokens の初期化（リファレンス: generate_tokens = np.array([[START_SPEECH_TOKEN]])）
@@ -424,15 +509,100 @@ namespace CBoxTTS.Native
                          pastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
                      }
 
-                    // 最後のステップのLogitsを取得
+                    // 最後のステップのLogitsを取得（条件付きパス）
                     int seqLen = logitsTensor.Dimensions[1];
                     int vocabSize = logitsTensor.Dimensions[2];
                     
-                    // Logitsを配列に抽出（最後のタイムステップのみ）
-                    float[] logits = new float[vocabSize];
+                    // 条件付きLogitsを配列に抽出（最後のタイムステップのみ）
+                    float[] condLogits = new float[vocabSize];
                     for (int v = 0; v < vocabSize; v++)
                     {
-                        logits[v] = logitsTensor[0, seqLen - 1, v];
+                        condLogits[v] = logitsTensor[0, seqLen - 1, v];
+                    }
+
+                    // CFG: 無条件パスの実行と補間
+                    float[] logits;
+                    if (useCfg)
+                    {
+                        // 無条件パスの言語モデル入力を構築
+                        DenseTensor<float> uncondCurrentEmbeds;
+                        DenseTensor<long> uncondCurrentMask;
+                        if (step == 0)
+                        {
+                            // 初回: 無条件埋め込み全体を入力
+                            uncondCurrentEmbeds = uncondEmbeds!;
+                            var uncondMaskValues = Enumerable.Repeat(1L, uncondSeqLen).ToArray();
+                            uncondCurrentMask = new DenseTensor<long>(uncondMaskValues, new[] { 1, uncondMaskValues.Length });
+                        }
+                        else
+                        {
+                            // 2ステップ目以降: 前ステップで生成されたトークンの埋め込みのみを入力
+                            uncondCurrentEmbeds = currentEmbeds; // 条件付きパスと同じ次トークン埋め込み
+                            int uncondTotalLen = uncondSeqLen + step;
+                            var uncondMaskValues = Enumerable.Repeat(1L, uncondTotalLen).ToArray();
+                            uncondCurrentMask = new DenseTensor<long>(uncondMaskValues, new[] { 1, uncondMaskValues.Length });
+                        }
+
+                        var uncondLmInputs = new List<NamedOnnxValue>
+                        {
+                            NamedOnnxValue.CreateFromTensor("inputs_embeds", uncondCurrentEmbeds),
+                            NamedOnnxValue.CreateFromTensor("attention_mask", uncondCurrentMask)
+                        };
+
+                        if (_languageModel.InputMetadata.ContainsKey("position_ids"))
+                        {
+                            long[] uncondPosIds;
+                            if (step == 0)
+                            {
+                                uncondPosIds = new long[uncondSeqLen];
+                                for (int p = 0; p < uncondSeqLen; p++) uncondPosIds[p] = (long)p;
+                            }
+                            else
+                            {
+                                int uncondTotalLen = uncondSeqLen + step;
+                                uncondPosIds = new long[] { (long)(uncondTotalLen - 1) };
+                            }
+                            var uncondPosTensor = new DenseTensor<long>(uncondPosIds, new[] { 1, uncondPosIds.Length });
+                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", uncondPosTensor));
+                        }
+
+                        for (int i = 0; i < numKvLayers; i++)
+                        {
+                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", uncondPastKeyValues[$"past_key_values.{i}.key"]));
+                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", uncondPastKeyValues[$"past_key_values.{i}.value"]));
+                        }
+
+                        using var uncondLmResults = _languageModel.Run(uncondLmInputs);
+                        var uncondLogitsTensor = uncondLmResults.First(o => o.Name == "logits").AsTensor<float>();
+
+                        // 無条件KVキャッシュを更新
+                        for (int i = 0; i < numKvLayers; i++)
+                        {
+                            var presentKey = uncondLmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
+                            var presentVal = uncondLmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
+                            uncondPastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
+                            uncondPastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
+                        }
+
+                        // 無条件Logitsを抽出
+                        int uncondSeqLenOut = uncondLogitsTensor.Dimensions[1];
+                        float[] uncondLogits = new float[vocabSize];
+                        for (int v = 0; v < vocabSize; v++)
+                        {
+                            uncondLogits[v] = uncondLogitsTensor[0, uncondSeqLenOut - 1, v];
+                        }
+
+                        // CFG補間: final = uncond + cfg_weight * (cond - uncond)
+                        logits = new float[vocabSize];
+                        for (int v = 0; v < vocabSize; v++)
+                        {
+                            logits[v] = uncondLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
+                        }
+                    }
+                    else
+                    {
+                        // CFG無効: 条件付きLogitsをそのまま使用
+                        logits = condLogits;
                     }
 
                     // 反復ペナルティの適用（リファレンス: RepetitionPenaltyLogitsProcessor）
@@ -542,7 +712,7 @@ namespace CBoxTTS.Native
         /// 長文入力による自己回帰ループ崩壊を防ぐ。
         /// </summary>
         public async Task<float[]> GenerateBatchAsync(string fullText, string voicePath, float exaggeration, float temperature, 
-            MorphemeEngine morph, Tokenizer tokenizer, long langToken, Action<string>? statusCallback = null)
+            MorphemeEngine morph, Tokenizer tokenizer, long langToken, float cfgWeight = 0.5f, Action<string>? statusCallback = null)
         {
             Log("=== GenerateBatchAsync 開始 ===");
             
@@ -552,8 +722,18 @@ namespace CBoxTTS.Native
                 normalizedText = EnglishNormalizer.Normalize(fullText);
             }
 
-            // 句読点で分割（。、！？!?.）
-            var sentences = SplitSentences(normalizedText);
+            // 英語の場合、テキストが比較的短い（150文字以下）なら分割せずに1文として処理して流暢性を劇的に向上させる
+            bool isEnglish = (langToken == 708 || langToken == 1);
+            List<string> sentences;
+            if (isEnglish && normalizedText.Length <= 150)
+            {
+                sentences = new List<string> { normalizedText };
+                Log("英語テキストが150文字以下のため、分割せずに1つの文として合成します。");
+            }
+            else
+            {
+                sentences = SplitSentences(normalizedText);
+            }
             Log($"文分割結果: {sentences.Count} 文");
             
             if (sentences.Count <= 1)
@@ -566,7 +746,7 @@ namespace CBoxTTS.Native
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
-                var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature);
+                var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature, cfgWeight);
                 return PadAudio(singleWav);
             }
 
@@ -588,7 +768,7 @@ namespace CBoxTTS.Native
                 }
                 
                 var sentenceIds = tokenizer.Encode(processedText, langToken);
-                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature);
+                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature, cfgWeight);
                 
                 if (wav != null && wav.Length > 0)
                 {
@@ -603,7 +783,8 @@ namespace CBoxTTS.Native
             }
 
             // 全波形を結合（チャンク間に短い無音を挿入）
-            int silenceGap = 2400; // 0.1秒 (24000Hz * 0.1s)
+            // 英語は流れるようにスラスラ発音させるため、無音ギャップを極限まで短くする (0.03秒 @ 24kHz = 720サンプル)
+            int silenceGap = isEnglish ? 720 : 2400; 
             int totalLength = 0;
             foreach (var chunk in allWavChunks) totalLength += chunk.Length;
             totalLength += (allWavChunks.Count - 1) * silenceGap;
@@ -627,6 +808,7 @@ namespace CBoxTTS.Native
 
         /// <summary>
         /// 音声波形の冒頭と末尾に無音パディングを追加して、再生時の頭切れやぶつ切りを防ぐ。
+        /// さらに、無音境界部でのプチ音（ポップノイズ）を防ぐため、極めて短いフェードイン・フェードアウト（5ms = 120サンプル）を適用する。
         /// </summary>
         private float[] PadAudio(float[] audio)
         {
@@ -639,8 +821,118 @@ namespace CBoxTTS.Native
             var padded = new float[audio.Length + startPadding + endPadding];
             Array.Copy(audio, 0, padded, startPadding, audio.Length);
 
-            Log($"無音パディング適用: 冒頭 {startPadding} サンプル, 末尾 {endPadding} サンプルを追加");
+            // ポップノイズ低減用フェードイン・アウト (5ms @ 24kHz = 120サンプル)
+            int fadeSamples = Math.Min(120, audio.Length / 2);
+            if (fadeSamples > 0)
+            {
+                // 音声開始部（インデックス: startPadding から startPadding + fadeSamples - 1）
+                for (int i = 0; i < fadeSamples; i++)
+                {
+                    float factor = (float)i / fadeSamples;
+                    padded[startPadding + i] *= factor;
+                }
+
+                // 音声終了部（インデックス: startPadding + audio.Length - fadeSamples から同終了位置）
+                int endStart = startPadding + audio.Length - fadeSamples;
+                for (int i = 0; i < fadeSamples; i++)
+                {
+                    float factor = 1.0f - ((float)i / fadeSamples);
+                    padded[endStart + i] *= factor;
+                }
+            }
+
+            Log($"無音パディング・フェード適用: 冒頭 {startPadding} サンプル, 末尾 {endPadding} サンプルを追加 (フェード長: {fadeSamples} サンプル)");
             return padded;
+        }
+
+        /// <summary>
+        /// 参照音声の音量を正規化（ピークを最大振幅 -1.0 dB ≒ 0.89 にスケーリング）する。
+        /// 話者特徴抽出における音量依存のばらつきを排除する。
+        /// </summary>
+        private float[] NormalizeAudioVolume(float[] audio)
+        {
+            if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
+
+            float maxAbs = 0f;
+            for (int i = 0; i < audio.Length; i++)
+            {
+                float absVal = Math.Abs(audio[i]);
+                if (absVal > maxAbs) maxAbs = absVal;
+            }
+
+            if (maxAbs < 1e-5f)
+            {
+                Log("参照音声の音量が極めて小さいため、音量正規化をスキップします。");
+                return audio; // 無音に近い場合は処理しない
+            }
+
+            // ピークを 0.89 (-1.0 dB) に正規化
+            float targetPeak = 0.89f;
+            float scale = targetPeak / maxAbs;
+
+            // スケール変更が微小（1%未満）な場合はスキップ
+            if (Math.Abs(scale - 1.0f) < 0.01f)
+            {
+                return audio;
+            }
+
+            var normalized = new float[audio.Length];
+            for (int i = 0; i < audio.Length; i++)
+            {
+                normalized[i] = audio[i] * scale;
+            }
+
+            Log($"参照音声音量正規化適用: Peak {maxAbs:F4} → {targetPeak:F2} (Scale: {scale:F4})");
+            return normalized;
+        }
+
+        /// <summary>
+        /// 音声波形の先頭と末尾の無音区間をトリムする。
+        /// 参照音声の前処理で使用し、エンコーダへの入力品質を向上させる。
+        /// </summary>
+        /// <param name="audio">音声波形データ</param>
+        /// <param name="threshold">無音判定しきい値（振幅の絶対値）</param>
+        private float[] TrimSilence(float[] audio, float threshold = 0.01f)
+        {
+            if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
+
+            // 先頭の無音を検出
+            int startIdx = 0;
+            for (int i = 0; i < audio.Length; i++)
+            {
+                if (Math.Abs(audio[i]) > threshold)
+                {
+                    startIdx = i;
+                    break;
+                }
+            }
+
+            // 末尾の無音を検出
+            int endIdx = audio.Length - 1;
+            for (int i = audio.Length - 1; i >= startIdx; i--)
+            {
+                if (Math.Abs(audio[i]) > threshold)
+                {
+                    endIdx = i;
+                    break;
+                }
+            }
+
+            // トリム前後に少し余裕を持たせる（480サンプル = 0.02秒）
+            int margin = 480;
+            startIdx = Math.Max(0, startIdx - margin);
+            endIdx = Math.Min(audio.Length - 1, endIdx + margin);
+
+            int trimmedLength = endIdx - startIdx + 1;
+            if (trimmedLength <= 0 || trimmedLength >= audio.Length)
+            {
+                return audio; // トリム不要またはすべて無音
+            }
+
+            var trimmed = new float[trimmedLength];
+            Array.Copy(audio, startIdx, trimmed, 0, trimmedLength);
+            Log($"無音トリム: {audio.Length} → {trimmedLength} サンプル (先頭 {startIdx} / 末尾 {audio.Length - endIdx - 1} サンプル除去)");
+            return trimmed;
         }
 
         /// <summary>
@@ -780,9 +1072,13 @@ namespace CBoxTTS.Native
         public void Dispose()
         {
             _speechEncoder?.Dispose();
+            _speechEncoder = null;
             _languageModel?.Dispose();
+            _languageModel = null;
             _condDecoder?.Dispose();
+            _condDecoder = null;
             _embedTokens?.Dispose();
+            _embedTokens = null;
         }
     }
 
@@ -869,6 +1165,10 @@ namespace CBoxTTS.Native
         public static bool PatchModel(string filePath)
         {
             if (!File.Exists(filePath)) return false;
+
+            // パッチ済みマーカーファイルが存在すれば、再パッチをスキップ（大容量ファイルのメモリ圧迫回避）
+            string markerPath = filePath + ".patched";
+            if (File.Exists(markerPath)) return false;
 
             byte[] modelData;
             try
@@ -957,6 +1257,8 @@ namespace CBoxTTS.Native
                             File.WriteAllBytes(filePath, outMs.ToArray());
                         }
                         Console.WriteLine($"C# GQA PATCH SUCCESS: {Path.GetFileName(filePath)}");
+                        // パッチ済みマーカーを作成（次回以降のスキップ用）
+                        try { File.WriteAllText(markerPath, "patched"); } catch { }
                         return true;
                     }
                 }
