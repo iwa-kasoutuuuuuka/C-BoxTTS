@@ -288,7 +288,7 @@ namespace CBoxTTS.Native
                     else _languageModel = session;
 
                     Log($"[Metadata] {baseName} Inputs:");
-                    foreach (var input in session.InputMetadata)
+                    foreach (var input in session!.InputMetadata)
                     {
                         Log($"  Input: {input.Key}, Shape: [{string.Join(",", input.Value.Dimensions)}]");
                     }

@@ -527,14 +527,18 @@ namespace CBoxTTS.Native
             {
                 UserDictionary.Clear();
                 string path = System.IO.Path.Combine(baseDir, "user_dict_en.txt");
-                if (!System.IO.File.Exists(path))
+                
+                // 開発時 (bin/Debug/net... 等) のために親ディレクトリを辿って探索
+                var currentDir = new System.IO.DirectoryInfo(baseDir);
+                int maxDepth = 5;
+                while (!System.IO.File.Exists(path) && currentDir != null && maxDepth > 0)
                 {
-                    // 親ディレクトリも探索（デバッグ環境用）
-                    var parent = System.IO.Directory.GetParent(baseDir);
-                    if (parent != null)
+                    currentDir = currentDir.Parent;
+                    if (currentDir != null)
                     {
-                        path = System.IO.Path.Combine(parent.FullName, "user_dict_en.txt");
+                        path = System.IO.Path.Combine(currentDir.FullName, "user_dict_en.txt");
                     }
+                    maxDepth--;
                 }
 
                 if (System.IO.File.Exists(path))
