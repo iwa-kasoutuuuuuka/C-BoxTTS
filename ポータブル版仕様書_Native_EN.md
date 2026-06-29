@@ -41,7 +41,10 @@ Release_Portable_EN/
 *   **時刻変換**: `3:00` → `three o'clock`, `3:30 pm` → `three thirty pm` 等の時刻表記を展開。
 *   **年号変換**: `2024` → `twenty twenty-four`, `1999` → `nineteen ninety-nine` 等の年号を自然な読みに変換。
 *   **分数変換**: `1/2` → `one half`, `3/4` → `three quarters` 等の分数を展開。
-*   **頭字語**: FBI, NASA 等の大文字頭字語を不自然に展開・破壊せず、そのままの単語として滑らかに発音可能に保持。
+*   **英語短縮形の保護**: `don't` や `it's` などのアポストロフィを含む短縮形が BPE トークナイザーに渡る前段で分解されず適切に保持されるよう、英語テキスト時の NFD 正規化をスキップさせ保護を強化。
+*   **PC・FA業界専門用語（User Dictionary）への対応**: IT/PC業界用語（`CPU`, `GPU`, `SSD` 等）やFA（ファクトリーオートメーション）業界用語（`PLC`, `OMRON`, `SCADA` 等）の自然な発音を記述した英語ユーザー辞書（`user_dict_en.txt`）を標準搭載。
+*   **一般英単語の誤スペルアウト防止**: 2〜6文字の大文字頭字語のスペルアウト処理において、全大文字文の中の一般的な英単語（`IT`, `IS`, `DAY` 等）が誤ってスペルアウトされるのを防ぐ除外保護リスト（`KnownCommonWords`）を追加。
+*   **頭字語**: FBI, NASA, SCADA, BIOS 等の既知の大文字頭字語を不自然に展開・破壊せず、そのままの単語として滑らかに発音可能に保持。
 *   **カンマ区切り数値**: `12,345` → `twelve thousand three hundred and forty-five` へ自動変換。
 *   **小数表記**: `12.34` → `twelve point three four` のように小数点以下を各桁読みで展開。
 *   **通貨表記**: `$1.50` → `one dollar and fifty cents`, `£100` → `one hundred pounds` 等、ドル・ポンドに対応。

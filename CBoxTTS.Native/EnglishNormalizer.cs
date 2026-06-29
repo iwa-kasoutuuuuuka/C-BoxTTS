@@ -86,10 +86,69 @@ namespace CBoxTTS.Native
         private static readonly Regex AmpWordRegex = new Regex(@"\b&\b", RegexOptions.Compiled);
         private static readonly Regex MultiSpaceRegex = new Regex(@"\s+", RegexOptions.Compiled);
 
-        // 頭字語の例外（そのまま発音する既知の頭字語）
+        // 頭字語の例外（そのまま単語として発音する既知の頭字語）
+        // これらは文字ごとのスペルアウトを行わず、単語として読み上げる
         private static readonly HashSet<string> KnownAcronymsAsWords = new(StringComparer.OrdinalIgnoreCase)
         {
-            "NASA", "NATO", "ASAP", "SCUBA", "LASER", "RADAR", "AIDS", "JPEG", "GIF"
+            // 一般的
+            "NASA", "NATO", "ASAP", "SCUBA", "LASER", "RADAR", "AIDS", "JPEG", "GIF",
+            // PC業界
+            "BIOS", "LAN", "WAN", "RAM", "SIM", "VRAM",
+            // FA業界
+            "SCADA", "PID"
+        };
+
+        // 一般英単語の大文字形（頭字語として処理してはならない）
+        // 全大文字で書かれたテキスト内の一般的な英単語を保護する
+        private static readonly HashSet<string> KnownCommonWords = new(StringComparer.Ordinal)
+        {
+            // 2文字
+            "IT", "IS", "IN", "AT", "UP", "ON", "NO", "SO", "DO", "WE", "HE", "ME",
+            "MY", "BE", "IF", "OR", "BY", "AN", "AS", "AM", "OF", "TO",
+            // 3文字
+            "THE", "AND", "FOR", "ARE", "BUT", "NOT", "YOU", "ALL", "ANY", "CAN",
+            "HER", "WAS", "ONE", "OUR", "OUT", "DAY", "HAD", "HAS", "HIS", "HOW",
+            "ITS", "LET", "MAY", "NEW", "NOW", "OLD", "SEE", "WAY", "WHO", "BOY",
+            "DID", "GET", "HIM", "HIT", "MAN", "RUN", "SAY", "SHE", "TOO", "USE",
+            // 4文字
+            "ALSO", "BACK", "BEEN", "CALL", "COME", "EACH", "FIND", "FROM", "GIVE",
+            "GOOD", "HAVE", "HERE", "HIGH", "JUST", "KNOW", "LAST", "LIKE", "LONG",
+            "LOOK", "MADE", "MAKE", "MANY", "MORE", "MOST", "MUCH", "MUST", "NAME",
+            "ONLY", "OVER", "PART", "SAID", "SAME", "SOME", "TAKE", "TELL", "THAN",
+            "THAT", "THEM", "THEN", "THIS", "TIME", "UPON", "VERY", "WANT", "WELL",
+            "WENT", "WERE", "WHAT", "WHEN", "WILL", "WITH", "WORD", "WORK", "YEAR",
+            "YOUR", "DOES", "DONE", "DOWN", "EVEN", "HAND", "HELP", "HOME", "INTO",
+            "LIFE", "LINE", "LIVE", "MOVE", "NEXT", "OPEN", "PLAY", "REAL", "SEEM",
+            "SHOW", "SIDE", "TURN", "USED",
+            // 3文字（追加）
+            "DAY", "AGO", "AGE", "AIR", "ARM", "ART", "ASK", "BIG", "BIT", "BOX",
+            "BUY", "CAR", "CUT", "EAR", "EAT", "END", "EYE", "FAR", "FEW", "FLY",
+            "FUN", "GUN", "GOT", "HOT", "JOB", "JOY", "KEY", "KID", "LAW", "LAY",
+            "LOT", "LOW", "MAP", "MIX", "OWN", "PAY", "POP", "POT", "PUT", "RAW",
+            "RED", "ROW", "SAD", "SIT", "SIX", "SKY", "SUM", "SUN", "TEN", "TIE",
+            "TIP", "TON", "TOP", "TRY", "TWO", "WIN", "WON", "YET", "ZEN",
+            // 5〜6文字
+            "ABOUT", "AFTER", "COULD", "EVERY", "FIRST", "FOUND", "GREAT", "HOUSE",
+            "LARGE", "NEVER", "OTHER", "PLACE", "POINT", "RIGHT", "SMALL", "STILL",
+            "THEIR", "THERE", "THESE", "THING", "THINK", "THREE", "UNDER", "WATER",
+            "WHERE", "WHICH", "WHILE", "WORLD", "WOULD", "WRITE", "BEING", "BELOW",
+            "BRING", "BUILD", "CARRY", "CLEAN", "CLOSE", "GIVEN", "GREEN", "GROUP",
+            "HUMAN", "LEARN", "LEAVE", "MIGHT", "NIGHT", "OFTEN", "ORDER", "PAPER",
+            "POWER", "PRESS", "QUITE", "ROUND", "SHALL", "SINCE", "SOUND", "STAND",
+            "START", "STATE", "STORY", "STUDY", "TABLE", "TODAY", "UNTIL", "WATCH",
+            "YOUNG", "CHANGE", "SHOULD", "BEFORE", "PEOPLE", "SYSTEM"
+        };
+
+        // 頭字語のスペルアウト読み辞書（文字ごとに分けて読み上げる）
+        // KnownAcronymsAsWords に含まれない頭字語を正しくスペルアウトするためのマッピング
+        private static readonly Dictionary<char, string> LetterPronunciations = new()
+        {
+            {'A', "ay"}, {'B', "bee"}, {'C', "see"}, {'D', "dee"}, {'E', "ee"},
+            {'F', "eff"}, {'G', "jee"}, {'H', "aitch"}, {'I', "eye"}, {'J', "jay"},
+            {'K', "kay"}, {'L', "ell"}, {'M', "em"}, {'N', "en"}, {'O', "oh"},
+            {'P', "pee"}, {'Q', "queue"}, {'R', "ar"}, {'S', "ess"}, {'T', "tee"},
+            {'U', "you"}, {'V', "vee"}, {'W', "double you"}, {'X', "ex"}, {'Y', "why"},
+            {'Z', "zee"}
         };
 
         public static string Normalize(string text)
@@ -112,6 +171,44 @@ namespace CBoxTTS.Native
             // 0. URL・メールアドレスの除去（TTSで発音不能なため）
             text = UrlRegex.Replace(text, "");
             text = EmailRegex.Replace(text, "");
+
+            // 0.5. 英語短縮形（contractions）の保護
+            // アポストロフィを含む短縮形がトークナイザーで正しく処理されるよう保護する
+            // 標準的な短縮形は保持し、特殊引用符をストレートアポストロフィに統一
+            text = text.Replace("\u2019", "'"); // 右シングルクォート → アポストロフィ
+            text = text.Replace("\u2018", "'"); // 左シングルクォート → アポストロフィ
+
+            // 0.6. 頭字語のスペルアウト処理
+            // KnownAcronymsAsWords に含まれない2〜6文字の大文字列をスペルアウトする
+            text = AcronymRegex.Replace(text, m =>
+            {
+                string acr = m.Value;
+                // 単語として発音する頭字語はそのまま返す
+                if (KnownAcronymsAsWords.Contains(acr))
+                {
+                    return acr;
+                }
+                // 一般的な英単語の大文字形（IT, IS, A, THE など）はそのまま返す
+                if (KnownCommonWords.Contains(acr))
+                {
+                    return acr;
+                }
+                // それ以外はアルファベットをスペルアウト
+                var spelled = new List<string>();
+                foreach (char c in acr)
+                {
+                    if (LetterPronunciations.TryGetValue(char.ToUpper(c), out string? pron))
+                    {
+                        spelled.Add(pron);
+                    }
+                    else
+                    {
+                        spelled.Add(c.ToString());
+                    }
+                }
+                return string.Join(" ", spelled);
+            });
+
 
 
             // 1. 略語の展開
@@ -211,7 +308,11 @@ namespace CBoxTTS.Native
                 return m.Value;
             });
 
-            // 11. 記号の置換
+            // 11. スラッシュの置換（I/O → eye oh、TCP/IP → 個別に処理）
+            // 単語間のスラッシュを "slash" に変換（ただし分数は前段で処理済み）
+            text = Regex.Replace(text, @"([A-Za-z])/((?:[A-Za-z]))", "$1 slash $2");
+
+            // 12. 記号の置換
             text = text.Replace("%", " percent");
             text = text.Replace("@", " at ");
             text = text.Replace("#", " number ");

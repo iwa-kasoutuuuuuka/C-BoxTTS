@@ -28,6 +28,9 @@ namespace CBoxTTS.Native
 
         private readonly string _modelsDir;
         private ModelType _currentModelType = ModelType.Multilingual;
+        
+        // embed_tokens.onnx のEmbedding行列の語彙サイズ（LoadModel 時に自動検出）
+        private long _embedVocabSize = -1;
 
         // モデルごとのファイル定義
         private string GetLMFileName(ModelType type) => type switch
@@ -129,7 +132,20 @@ namespace CBoxTTS.Native
                 foreach (var item in filesToDownload)
                 {
                     string localPath = Path.GetFullPath(Path.Combine(subDir, item.LocalName));
-                    if (File.Exists(localPath)) continue;
+                    if (File.Exists(localPath))
+                    {
+                        var info = new FileInfo(localPath);
+                        long minSize = GetMinimumExpectedSize(item.LocalName);
+                        if (info.Length >= minSize)
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            Log($"警告: {item.LocalName} のサイズが小さすぎます ({info.Length} bytes < 期待値 {minSize} bytes)。破損とみなして削除・再ダウンロードします。");
+                            File.Delete(localPath);
+                        }
+                    }
 
                     string baseUrl = GetBaseUrl(type);
                     string url = (item.RemoteName.EndsWith(".json") || item.RemoteName == "default_voice.wav")
@@ -150,12 +166,12 @@ namespace CBoxTTS.Native
                         {
                             // 不完全ダウンロード保護: 一時ファイルに書き込み、完了後にリネーム
                             string tempPath = localPath + ".tmp";
+                            long totalRead = 0L;
                             try
                             {
                                 using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                                 {
                                     var buffer = new byte[8192];
-                                    var totalRead = 0L;
                                     int read;
 
                                     while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) != 0)
@@ -166,6 +182,12 @@ namespace CBoxTTS.Native
                                             progressCallback?.Invoke($"{Path.GetFileName(localPath)} をダウンロード中... ({(double)totalRead / totalBytes * 100:F1}%)", (double)totalRead / totalBytes * 100);
                                     }
                                 }
+
+                                if (totalBytes > 0 && totalRead != totalBytes)
+                                {
+                                    throw new IOException($"ダウンロードされたサイズ ({totalRead} bytes) が Content-Length ({totalBytes} bytes) と一致しません。");
+                                }
+
                                 // ダウンロード完了後にリネーム（アトミック操作）
                                 if (File.Exists(localPath)) File.Delete(localPath);
                                 File.Move(tempPath, localPath);
@@ -243,7 +265,25 @@ namespace CBoxTTS.Native
                     }
                     
                     if (baseName.StartsWith("speech")) _speechEncoder = session;
-                    else if (baseName.StartsWith("embed")) _embedTokens = session;
+                    else if (baseName.StartsWith("embed"))
+                    {
+                        _embedTokens = session;
+                        // embed_tokens.onnx のEmbedding行列の語彙サイズを検出する。
+                        // input_ids の Gather ノードが参照する重み行列の行数がモデルの語彙上限を決定する。
+                        // OutputMetadata の inputs_embeds の Shape から推測する:
+                        // 通常 Shape は [1, seq_len, embed_dim] なので embed_dim を取得。
+                        // InputMetadata の input_ids Shape の最初の次元から vocab_size が推測可能な場合もあるが、
+                        // 確実な方法はモデルファイルの重みを解析するか、試行錯誤で検出する必要がある。
+                        // ここでは、English モデル（語彙704）と Multilingual モデル（語彙2454+）を区別するために
+                        // モデルタイプから静的に設定する。
+                        _embedVocabSize = type switch
+                        {
+                            ModelType.English => 704,   // chatterbox-ONNX の embed_tokens は 704 行
+                            ModelType.Turbo => 6563,    // chatterbox-turbo-ONNX
+                            _ => 2454                   // chatterbox-multilingual-ONNX
+                        };
+                        Log($"[embed_tokens] モデルタイプ {type} の Embedding 語彙サイズを設定: {_embedVocabSize}");
+                    }
                     else if (baseName.StartsWith("conditional")) _condDecoder = session;
                     else _languageModel = session;
 
@@ -262,7 +302,7 @@ namespace CBoxTTS.Native
                 }
                 
                 _currentModelType = type;
-                Log("=== 全エンジンのロードに成功しました ===");
+                Log($"=== 全エンジンのロードに成功しました (Embedding語彙サイズ: {_embedVocabSize}) ===");
             }
             catch (Exception ex)
             {
@@ -271,6 +311,29 @@ namespace CBoxTTS.Native
             }
         }
 
+
+        private static long GetMinimumExpectedSize(string fileName)
+        {
+            if (fileName.EndsWith(".json")) return 1024L; // 1KB
+            if (fileName.EndsWith(".wav")) return 1024L; // 1KB
+            
+            // ONNXデータファイル (モデルの重み)
+            if (fileName.EndsWith(".onnx_data"))
+            {
+                if (fileName.StartsWith("embed_tokens")) return 10 * 1024 * 1024L; // 10MB
+                return 100 * 1024 * 1024L; // 100MB
+            }
+            
+            // ONNXモデル構造ファイル
+            if (fileName.EndsWith(".onnx"))
+            {
+                if (fileName.StartsWith("embed_tokens")) return 1024L; // 1KB
+                if (fileName.StartsWith("language_model")) return 50 * 1024L; // 50KB
+                return 500 * 1024L; // 500KB
+            }
+            
+            return 0L;
+        }
 
         private void Log(string message)
         {
@@ -291,7 +354,7 @@ namespace CBoxTTS.Native
             return new DenseTensor<T>(src.ToArray(), src.Dimensions);
         }
 
-        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f, float temperature = 0.8f, float cfgWeight = 0.5f)
+        public async Task<float[]> GenerateAsync(long[] inputIds, string voicePath, float exaggeration = 0.5f, float temperature = 0.8f, float cfgWeight = 0.5f, float repetitionPenalty = 1.1f)
         {
             if (_speechEncoder == null || _languageModel == null || _condDecoder == null || _embedTokens == null)
                 throw new InvalidOperationException("モデルがロードされていません。");
@@ -481,9 +544,6 @@ namespace CBoxTTS.Native
                 // generate_tokens の初期化
                 var generateTokens = new List<long> { startSpeechToken };
                 
-                // 反復ペナルティ係数（リファレンス: repetition_penalty = 1.2）
-                const float repetitionPenalty = 1.2f;
-
                 int maxNewTokens = 760; // 安全のための最大トークン制限（英語長文でも途中打ち切りを防ぐ）
                 Log("自己回帰ループ開始...");
                 
@@ -707,9 +767,15 @@ namespace CBoxTTS.Native
         /// 長文入力による自己回帰ループ崩壊を防ぐ。
         /// </summary>
         public async Task<float[]> GenerateBatchAsync(string fullText, string voicePath, float exaggeration, float temperature, 
-            MorphemeEngine morph, Tokenizer tokenizer, long langToken, float cfgWeight = 0.5f, Action<string>? statusCallback = null)
+            MorphemeEngine morph, Tokenizer tokenizer, long langToken, float cfgWeight = 0.5f, float repetitionPenalty = 1.1f, Action<string>? statusCallback = null)
         {
             Log("=== GenerateBatchAsync 開始 ===");
+            
+            // embed_tokens の Embedding 語彙サイズを Tokenizer に伝達（範囲外アクセス防止）
+            if (_embedVocabSize > 0)
+            {
+                tokenizer.SetEmbeddingVocabSize(_embedVocabSize);
+            }
             
             string normalizedText = fullText;
             if (langToken == 708 || langToken == 1) // 英語 ([en] トークン または 英語専用モデルの UNK トークン)
@@ -747,7 +813,7 @@ namespace CBoxTTS.Native
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
-                var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature, cfgWeight);
+                var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature, cfgWeight, repetitionPenalty);
                 return PadAudio(singleWav);
             }
 
@@ -769,7 +835,7 @@ namespace CBoxTTS.Native
                 }
                 
                 var sentenceIds = tokenizer.Encode(processedText, langToken);
-                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature, cfgWeight);
+                var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature, cfgWeight, repetitionPenalty);
                 
                 if (wav != null && wav.Length > 0)
                 {

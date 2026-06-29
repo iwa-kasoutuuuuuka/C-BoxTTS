@@ -1,9 +1,84 @@
 # C-Box TTS User Dictionary (English Edition)
 # Format: Word,Read
 # Lines starting with # are comments.
-# Examples:
-# AI,Artificial Intelligence
-# ChatGPT,Chat Gee Pee Tee
-# TTS,Text To Speech
+# ユーザー辞書はEnglishNormalizerの最初に適用されるため、
+# 頭字語のスペルアウト処理（AcronymRegex）より優先されます。
 
-NASA,National Aeronautics and Space Administration
+# === 一般的な技術用語 ===
+AI,ay eye
+ML,em ell
+DL,dee ell
+IoT,eye oh tee
+TTS,tee tee ess
+NLP,en ell pee
+LLM,ell ell em
+
+# === PC業界用語 ===
+CPU,see pee you
+GPU,jee pee you
+SSD,ess ess dee
+HDD,aitch dee dee
+USB,you ess bee
+HDMI,aitch dee em eye
+OS,oh ess
+API,ay pee eye
+SDK,ess dee kay
+CLI,see ell eye
+GUI,gooey
+NVMe,en vee em ee
+PCIe,pee see eye ee
+DDR,dee dee ar
+RGB,ar jee bee
+VPN,vee pee en
+DNS,dee en ess
+TCP,tee see pee
+UDP,you dee pee
+HTTP,aitch tee tee pee
+HTTPS,aitch tee tee pee ess
+URL,you ar ell
+IP,eye pee
+HTML,aitch tee em ell
+CSS,see ess ess
+JSON,jay son
+XML,ex em ell
+SQL,ess queue ell
+SaaS,sass
+IaaS,eye ass
+PaaS,pass
+
+# === FA (Factory Automation) 業界用語 ===
+PLC,pee ell see
+HMI,aitch em eye
+DCS,dee see ess
+I/O,eye oh
+OPC,oh pee see
+VFD,vee eff dee
+AC,ay see
+DC,dee see
+PROFINET,proffy net
+EtherCAT,eether cat
+PROFIBUS,proffy bus
+MODBUS,mod bus
+BACnet,back net
+MQTT,em queue tee tee
+OPC-UA,oh pee see you ay
+CNC,see en see
+CAD,cad
+CAM,cam
+PID,pee eye dee
+RTU,ar tee you
+MTU,em tee you
+SCARA,scarra
+MES,em ee ess
+ERP,ee ar pee
+
+# === メーカー名 ===
+OMRON,om ron
+Siemens,see mens
+Mitsubishi,mitsubishi
+Rockwell,rock well
+Fanuc,fan uck
+ABB,ay bee bee
+Schneider,shn eye der
+Keyence,key ence
+Beckhoff,beck hoff

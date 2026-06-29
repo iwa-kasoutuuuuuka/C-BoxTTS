@@ -46,6 +46,7 @@ namespace CBoxTTS.Native
             SpeedLabel.Text = "話速 (Speed)";
             TemperatureLabel.Text = "安定性 (Stability)";
             CfgWeightLabel.Text = "CFG/ペース (CFG/Pace)";
+            RepetitionPenaltyLabel.Text = "反復ペナルティ (Repetition)";
             VoicePromptLabel.Text = "参照音声 (Voice Prompt)";
             
             WatermarkText.Text = "ここに読み上げたいテキストを入力してください...";
@@ -71,6 +72,7 @@ namespace CBoxTTS.Native
             
             TemperatureLabel.Text = "安定性 (Stability)";
             CfgWeightLabel.Text = "CFG/ペース (CFG/Pace)";
+            RepetitionPenaltyLabel.Text = "反復ペナルティ (Repetition)";
             StatusText.Text = "初期化中...";
 #endif
         }
@@ -182,6 +184,18 @@ namespace CBoxTTS.Native
                 if (TemperatureSlider != null)
                 {
                     TemperatureSlider.Value = defaultTemp;
+                }
+
+                // モデルの種類に応じて RepetitionPenaltySlider のデフォルト値を自動セット
+                float defaultRepetitionPenalty = selectedType switch
+                {
+                    ModelType.Turbo => 1.15f,
+                    ModelType.English => 1.1f,
+                    _ => 1.1f
+                };
+                if (RepetitionPenaltySlider != null)
+                {
+                    RepetitionPenaltySlider.Value = defaultRepetitionPenalty;
                 }
 
                 StatusText.Text = GetMsg($"{selectedType} モデルを準備中...", $"Preparing {selectedType} model...");
@@ -476,6 +490,27 @@ namespace CBoxTTS.Native
                 e.Handled = true;
             }
         }
+
+        private void RepetitionPenaltyText_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (double.TryParse(RepetitionPenaltyText.Text, out double val))
+            {
+                if (val < 1.0) val = 1.0;
+                if (val > 1.5) val = 1.5;
+                RepetitionPenaltySlider.Value = val;
+            }
+            RepetitionPenaltyText.Text = RepetitionPenaltySlider.Value.ToString("F2");
+        }
+
+        private void RepetitionPenaltyText_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                RepetitionPenaltyText_LostFocus(sender, e);
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+        }
         private void VoicePrompt_DragOver(object sender, DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -590,6 +625,7 @@ namespace CBoxTTS.Native
                 float speed = (float)SpeedSlider.Value;
                 float temperature = (float)TemperatureSlider.Value;
                 float cfgWeight = (float)CfgWeightSlider.Value;
+                float repetitionPenalty = (float)RepetitionPenaltySlider.Value;
                 string voicePath = VoicePromptPathText.Text;
                 
                 if (!Path.IsPathRooted(voicePath))
@@ -602,7 +638,7 @@ namespace CBoxTTS.Native
                 var wav = await Task.Run(async () =>
                 {
                     return await _engine!.GenerateBatchAsync(text, voicePath, exaggeration, temperature,
-                        _morph!, _tokenizer!, langToken, cfgWeight, msg =>
+                        _morph!, _tokenizer!, langToken, cfgWeight, repetitionPenalty, msg =>
                         {
                             Dispatcher.Invoke(() => StatusText.Text = msg);
                         });
@@ -678,6 +714,7 @@ namespace CBoxTTS.Native
                     float speed = (float)SpeedSlider.Value;
                     float temperature = (float)TemperatureSlider.Value;
                     float cfgWeight = (float)CfgWeightSlider.Value;
+                    float repetitionPenalty = (float)RepetitionPenaltySlider.Value;
                     string voicePath = VoicePromptPathText.Text;
                     
                     if (!Path.IsPathRooted(voicePath))
@@ -695,7 +732,7 @@ namespace CBoxTTS.Native
                         var wav = await Task.Run(async () =>
                         {
                             return await _engine!.GenerateBatchAsync(lines[0], voicePath, exaggeration, temperature,
-                                _morph!, _tokenizer!, langToken, cfgWeight, msg =>
+                                _morph!, _tokenizer!, langToken, cfgWeight, repetitionPenalty, msg =>
                                 {
                                     Dispatcher.Invoke(() => StatusText.Text = msg);
                                 });
@@ -719,7 +756,7 @@ namespace CBoxTTS.Native
                             var wav = await Task.Run(async () =>
                             {
                                 return await _engine!.GenerateBatchAsync(line, voicePath, exaggeration, temperature,
-                                    _morph!, _tokenizer!, langToken, cfgWeight, msg =>
+                                    _morph!, _tokenizer!, langToken, cfgWeight, repetitionPenalty, msg =>
                                     {
                                         Dispatcher.Invoke(() => StatusText.Text = $"{msg} ({i + 1}/{lines.Count})");
                                     });

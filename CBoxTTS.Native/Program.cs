@@ -54,7 +54,17 @@ namespace CBoxTTS.Native
                 "This is 12.34% of the total.",
                 "IT IS A WONDERFUL DAY.",
                 "The target is 100% correct.",
-                "I have 12 apples, Mr. Smith. NASA works with FBI."
+                "I have 12 apples, Mr. Smith. NASA works with FBI.",
+                // PC/FA業界専門用語テスト
+                "The CPU utilizes GPU acceleration via PCIe interface.",
+                "The PLC controls the SCADA system through PROFINET.",
+                "OMRON's HMI connects to the VFD via MODBUS.",
+                "USB, HDMI, and SSD are common PC components.",
+                // 英語短縮形テスト
+                "I don't know what it's about.",
+                "We're going to the API endpoint.",
+                // 時刻パターン保護テスト
+                "The meeting is at 3:00 pm and ends at 5:30 pm."
             };
             foreach (var t in testTexts)
             {
@@ -98,11 +108,21 @@ namespace CBoxTTS.Native
                 string textEn = "It works beautifully on multilingual model!";
                 Console.WriteLine($"[EN Test] Input: {textEn}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.7f,
-                    morph, tokenizer, 708, 0.5f, msg => Console.WriteLine($"  [EN Status] {msg}"));
+                    morph, tokenizer, 708, 0.5f, 1.1f, msg => Console.WriteLine($"  [EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }
                 Console.WriteLine($"[EN Test] Saved to: {outPathEn}");
+
+                // 英語 (ユーザー報告の再現/検証用)
+                string textOmron = "OMRON Corporation is a leading global electronics and automation company based in Japan";
+                Console.WriteLine($"[OMRON Test] Input: {textOmron}");
+                float[] wavOmron = await engine.GenerateBatchAsync(textOmron, voicePath, 0.5f, 0.7f,
+                    morph, tokenizer, 708, 0.5f, 1.1f, msg => Console.WriteLine($"  [OMRON Status] {msg}"));
+
+                string outPathOmron = Path.Combine(baseDir, "test_harness_omron_out.wav");
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavOmron, outPathOmron); }
+                Console.WriteLine($"[OMRON Test] Saved to: {outPathOmron}");
             }
 
             // ==================== 3. English モデルテスト (英語専用) ====================
@@ -124,7 +144,7 @@ namespace CBoxTTS.Native
                 string textEn = "I have 12 apples, Mr. Smith. NASA works with FBI. IT IS A WONDERFUL DAY.";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.5f,
-                    morph, tokenizer, 1, 0.5f, msg => Console.WriteLine($"  [English EN Status] {msg}"));
+                    morph, tokenizer, 1, 0.5f, 1.1f, msg => Console.WriteLine($"  [English EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }
@@ -151,7 +171,7 @@ namespace CBoxTTS.Native
                 string textJa = "せかいはかくのほのおにつつまれた。だがじんるいはぜつめつしてはいなかった。";
                 Console.WriteLine($"[JA Test] Input: {textJa}");
                 float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.7f,
-                    morph, tokenizer, 723, 0.5f, msg => Console.WriteLine($"  [JA Status] {msg}"));
+                    morph, tokenizer, 723, 0.5f, 1.1f, msg => Console.WriteLine($"  [JA Status] {msg}"));
                 
                 string outPathJa = Path.Combine(baseDir, "test_harness_japanese_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
@@ -177,7 +197,7 @@ namespace CBoxTTS.Native
                 string textJa = "ターボモデルのテストです。素早く合成が行われます。";
                 Console.WriteLine($"[Turbo JA Test] Input: {textJa}");
                 float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.6f,
-                    morph, tokenizer, 723, 0.5f, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
+                    morph, tokenizer, 723, 0.5f, 1.15f, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
 
                 string outPathJa = Path.Combine(baseDir, "test_harness_turbo_japanese_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
@@ -204,7 +224,7 @@ namespace CBoxTTS.Native
                 string textJa = "せかいはかくのほのおにつつまれた。だがじんるいはぜつめつしてはいなかった。";
                 Console.WriteLine($"[JA Test] Input: {textJa}");
                 float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.7f,
-                    morph, tokenizer, 723, 0.5f, msg => Console.WriteLine($"  [JA Status] {msg}"));
+                    morph, tokenizer, 723, 0.5f, 1.1f, msg => Console.WriteLine($"  [JA Status] {msg}"));
                 
                 string outPathJa = Path.Combine(baseDir, "test_harness_japanese_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
@@ -214,11 +234,21 @@ namespace CBoxTTS.Native
                 string textEn = "It works beautifully on multilingual model!";
                 Console.WriteLine($"[EN Test] Input: {textEn}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.7f,
-                    morph, tokenizer, 708, 0.5f, msg => Console.WriteLine($"  [EN Status] {msg}"));
+                    morph, tokenizer, 708, 0.5f, 1.1f, msg => Console.WriteLine($"  [EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }
                 Console.WriteLine($"[EN Test] Saved to: {outPathEn}");
+
+                // 英語 (ユーザー報告の再現/検証用)
+                string textOmron = "OMRON Corporation is a leading global electronics and automation company based in Japan";
+                Console.WriteLine($"[OMRON Test] Input: {textOmron}");
+                float[] wavOmron = await engine.GenerateBatchAsync(textOmron, voicePath, 0.5f, 0.7f,
+                    morph, tokenizer, 708, 0.5f, 1.1f, msg => Console.WriteLine($"  [OMRON Status] {msg}"));
+
+                string outPathOmron = Path.Combine(baseDir, "test_harness_omron_out.wav");
+                using (var audio = new AudioEngine()) { audio.SaveWav(wavOmron, outPathOmron); }
+                Console.WriteLine($"[OMRON Test] Saved to: {outPathOmron}");
             }
 
             // ==================== 2. Turbo モデルテスト (日本語専用) ====================
@@ -240,7 +270,7 @@ namespace CBoxTTS.Native
                 string textJa = "ターボモデルのテストです。素早く合成が行われます。";
                 Console.WriteLine($"[Turbo JA Test] Input: {textJa}");
                 float[] wavJa = await engine.GenerateBatchAsync(textJa, voicePath, 0.5f, 0.6f,
-                    morph, tokenizer, 723, 0.5f, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
+                    morph, tokenizer, 723, 0.5f, 1.15f, msg => Console.WriteLine($"  [Turbo JA Status] {msg}"));
 
                 string outPathJa = Path.Combine(baseDir, "test_harness_turbo_japanese_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavJa, outPathJa); }
@@ -266,7 +296,7 @@ namespace CBoxTTS.Native
                 string textEn = "This is a test of the English exclusive model. Hello world!";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.8f,
-                    morph, tokenizer, 1, 0.5f, msg => Console.WriteLine($"  [English EN Status] {msg}"));
+                    morph, tokenizer, 1, 0.5f, 1.1f, msg => Console.WriteLine($"  [English EN Status] {msg}"));
 
                 string outPathEn = Path.Combine(baseDir, "test_harness_english_exclusive_out.wav");
                 using (var audio = new AudioEngine()) { audio.SaveWav(wavEn, outPathEn); }

@@ -14,8 +14,12 @@ namespace CBoxTTS.Native
         private const long JaToken = 723;
         private const long StopToken = 0;
         
-        // embed_tokens.onnx の入力対応インデックス境界の上限。LoadVocab 時に動的に設定される。
-        private long _maxValidTokenId = 2453;
+        // tokenizer.json 内の語彙ID最大値（LoadVocab 時に動的設定）
+        private long _maxVocabTokenId = 2453;
+        
+        // embed_tokens.onnx の実際のEmbedding行列行数（モデルロード後に SetEmbeddingVocabSize で設定）。
+        // この値が設定されている場合、_maxVocabTokenId より優先的にクランプ上限として使用される。
+        private long _embeddingVocabSize = -1;
 
         public Tokenizer(string jsonPath)
         {
@@ -55,9 +59,9 @@ namespace CBoxTTS.Native
                 }
                 if (_vocab.Count > 0)
                 {
-                    _maxValidTokenId = _vocab.Values.Max();
+                    _maxVocabTokenId = _vocab.Values.Max();
                 }
-                Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}, 動的モデル上限(MaxValidTokenId): {_maxValidTokenId}");
+                Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}, 語彙最大ID: {_maxVocabTokenId}");
 
                 _merges.Clear();
                 if (doc.RootElement.GetProperty("model").TryGetProperty("merges", out var mergesElement))
@@ -107,13 +111,37 @@ namespace CBoxTTS.Native
             }
         }
 
+        /// <summary>
+        /// embed_tokens.onnx の実際のEmbedding行列サイズを設定する。
+        /// モデルロード時に TTSEngine から呼び出され、トークンIDの安全なクランプ上限を決定する。
+        /// </summary>
+        public void SetEmbeddingVocabSize(long size)
+        {
+            _embeddingVocabSize = size;
+            Log($"Embedding語彙サイズを設定しました: {size} (クランプ上限ID: {size - 1})");
+        }
+
+        /// <summary>
+        /// トークンIDのクランプに使用する有効上限IDを返す。
+        /// embed_tokens のEmbedding行列サイズが設定されている場合はそちらを優先する。
+        /// </summary>
+        private long GetMaxValidTokenId()
+        {
+            if (_embeddingVocabSize > 0)
+            {
+                return _embeddingVocabSize - 1; // 0-indexed なのでサイズ-1が最大有効ID
+            }
+            return _maxVocabTokenId;
+        }
+
         public long[] Encode(string text, long languageToken)
         {
             Log($"=== Tokenizer.Encode 開始 ===");
             Log($"入力テキスト: \"{text}\", 言語トークンID: {languageToken}");
 
+            bool isEnglish = (languageToken == 708 || languageToken == 1);
             string processed = text;
-            if (languageToken == 708 || languageToken == 1) // 英語 ([en] または 英語専用モデル) の場合のみ適用
+            if (isEnglish)
             {
                 // 記号正規化 (punc_norm)
                 processed = PuncNorm(processed);
@@ -121,8 +149,18 @@ namespace CBoxTTS.Native
                 processed = processed.ToLowerInvariant();
             }
 
-            // NFD正規化 (日本語の濁音分解に必要)
-            string normalized = processed.Normalize(System.Text.NormalizationForm.FormD);
+            // NFD正規化: 日本語の濁音分解（「が」→「か」+「゛」）に必要だが、
+            // 英語では contractions（don't, it's）のアポストロフィが分解されて
+            // トークン不一致・UNK落ちの原因になるため、英語では適用しない
+            string normalized;
+            if (isEnglish)
+            {
+                normalized = processed;
+            }
+            else
+            {
+                normalized = processed.Normalize(System.Text.NormalizationForm.FormD);
+            }
             Log($"前処理・正規化後のテキスト: \"{normalized}\"");
 
             var ids = new List<long> { StartToken, languageToken };
@@ -186,13 +224,14 @@ namespace CBoxTTS.Native
                 }
 
                 // 語彙 ID に変換
+                long maxValidId = GetMaxValidTokenId();
                 foreach (var sym in symbols)
                 {
                     if (_vocab.TryGetValue(sym, out long id))
                     {
-                        if (id > _maxValidTokenId)
+                        if (id > maxValidId)
                         {
-                            Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {_maxValidTokenId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
+                            Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {maxValidId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
                             id = 1;
                         }
                         else
@@ -244,6 +283,11 @@ namespace CBoxTTS.Native
             string merged = string.Join(" ", parts);
 
             // 記号の置換 (Python版 punc_norm 準拠)
+            // 時刻パターン（例: 3:00, 12:30）を保護してからコロン変換を行う
+            // プレースホルダに置換 → コロン変換 → プレースホルダを復元
+            merged = System.Text.RegularExpressions.Regex.Replace(
+                merged, @"(\d{1,2}):(\d{2})", "$1\x00COLON\x00$2");
+
             var puncToReplace = new (string Old, string New)[]
             {
                 ("...", ", "),
@@ -264,6 +308,9 @@ namespace CBoxTTS.Native
             {
                 merged = merged.Replace(item.Old, item.New);
             }
+
+            // 時刻パターンのプレースホルダを復元
+            merged = merged.Replace("\x00COLON\x00", ":");
 
             merged = merged.TrimEnd();
 
