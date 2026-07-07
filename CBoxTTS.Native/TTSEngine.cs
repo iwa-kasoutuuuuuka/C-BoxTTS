@@ -660,7 +660,8 @@ namespace CBoxTTS.Native
                         logits = condLogits;
                     }
 
-                    // 反復ペナルティの適用（リファレンス: RepetitionPenaltyLogitsProcessor）
+                    // 反復ペナルティの適用（二段階方式）
+                    // 1段目: 全生成履歴に対して標準ペナルティを適用
                     var uniqueTokens = new HashSet<long>(generateTokens);
                     foreach (long tokenId in uniqueTokens)
                     {
@@ -671,6 +672,52 @@ namespace CBoxTTS.Native
                             else
                                 logits[tokenId] /= repetitionPenalty;
                         }
+                    }
+                    // 2段目: 直近64トークンに出現したものへは追加の強化ペナルティを適用
+                    // ループ発生時の「同じパターンの繰り返し」を強力に抑制する
+                    const int recentWindow = 64;
+                    float strongPenalty = repetitionPenalty * 1.3f;
+                    int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
+                    var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
+                    foreach (long tokenId in recentTokens)
+                    {
+                        if (tokenId >= 0 && tokenId < vocabSize)
+                        {
+                            if (logits[tokenId] < 0)
+                                logits[tokenId] *= strongPenalty;
+                            else
+                                logits[tokenId] /= strongPenalty;
+                        }
+                    }
+                    
+                    // ループ検出: 直近トークン列に同一パターン（長さ3〜8）の繰り返しがあれば強制終了
+                    if (generateTokens.Count >= 16)
+                    {
+                        bool loopDetected = false;
+                        int checkCount = Math.Min(generateTokens.Count, 48);
+                        var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
+                        for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
+                        {
+                            if (recent.Length < patLen * 3) continue;
+                            // 末尾から patLen 個のパターンが直前にも同じ順序で3回以上出現するか確認
+                            var tail = recent.Skip(recent.Length - patLen).ToArray();
+                            int matchCount = 1; // 自分自身を1カウントとしてスタート
+                            for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
+                            {
+                                bool match = true;
+                                for (int k = 0; k < patLen; k++)
+                                {
+                                    if (recent[pos + k] != tail[k]) { match = false; break; }
+                                }
+                                if (match) matchCount++;
+                            }
+                            if (matchCount >= 3)
+                            {
+                                Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
+                                loopDetected = true;
+                            }
+                        }
+                        if (loopDetected) break;
                     }
 
                     // 確率的サンプリング (temperature, topP = 0.95f, minP = 0.05f)
@@ -784,9 +831,11 @@ namespace CBoxTTS.Native
             }
 
             // 英語の場合、テキストが比較的短い（350文字以下）なら分割せずに1文として処理して流暢性を劇的に向上させる
+            // ただし、文頭に数字マーカー（1, や 2. など）がある場合は分割して間を空けるためにショートカットを回避する
             bool isEnglish = (langToken == 708 || langToken == 1);
+            bool hasNumberMarker = System.Text.RegularExpressions.Regex.IsMatch(normalizedText, @"(?<=^|\n)[0-9]+\s*[\.,\)]+\s+", System.Text.RegularExpressions.RegexOptions.Multiline);
             List<string> sentences;
-            if (isEnglish && normalizedText.Length <= 350)
+            if (isEnglish && normalizedText.Length <= 350 && !hasNumberMarker)
             {
                 sentences = new List<string> { normalizedText };
                 Log("英語テキストが350文字以下のため、分割せずに1つの文として合成します。");
@@ -822,7 +871,11 @@ namespace CBoxTTS.Native
             for (int i = 0; i < sentences.Count; i++)
             {
                 string sentence = sentences[i];
-                if (string.IsNullOrWhiteSpace(sentence)) continue;
+                if (string.IsNullOrWhiteSpace(sentence))
+                {
+                    allWavChunks.Add(Array.Empty<float>()); // インデックスを sentences と完全に一致させるため空の波形を追加
+                    continue;
+                }
                 
                 Log($"チャンク {i+1}/{sentences.Count}: \"{sentence}\"");
                 statusCallback?.Invoke($"音声合成中... ({i+1}/{sentences.Count})");
@@ -839,7 +892,12 @@ namespace CBoxTTS.Native
                 
                 if (wav != null && wav.Length > 0)
                 {
+                    wav = TrimSilence(wav, 0.02f); // 各チャンクの冒頭・末尾の無音を除去
                     allWavChunks.Add(wav);
+                }
+                else
+                {
+                    allWavChunks.Add(Array.Empty<float>()); // 合成失敗時もインデックス維持のため追加
                 }
             }
 
@@ -1010,14 +1068,30 @@ namespace CBoxTTS.Native
             return trimmed;
         }
 
+        private static bool IsNumberMarker(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            // 1つ以上の記号（カンマ、ピリオド、右括弧）の連続を許容する
+            return System.Text.RegularExpressions.Regex.IsMatch(text.Trim(), @"^[0-9]+\s*[\.,\)]+\s*$", System.Text.RegularExpressions.RegexOptions.Multiline);
+        }
+
         /// <summary>
-        /// テキストを句読点で文単位に分割する。
+        /// テキストを句読点で文単位に分割する。文頭の数字マーカー(1, や 2. など)も個別に分割する。
         /// </summary>
         private List<string> SplitSentences(string text)
         {
             var sentences = new List<string>();
+            
+            // 文頭の数字リストマーカー (例: "1, ", "1,, ", "2. ", "10) ") の後に改行を挟んで通常分割に回す
+            string processedText = System.Text.RegularExpressions.Regex.Replace(
+                text, 
+                @"(?<=^|\n)([0-9]+\s*[\.,\)]+)\s+", 
+                "$1\n",
+                System.Text.RegularExpressions.RegexOptions.Multiline
+            );
+
             // 句読点を保持しつつ分割。連続する句読点（！？など）を一つの区切りとして扱う
-            var segments = System.Text.RegularExpressions.Regex.Split(text, @"([。！？\n\.!\?]+)");
+            var segments = System.Text.RegularExpressions.Regex.Split(processedText, @"([。！？\n\.!\?]+)");
             
             int i = 0;
             while (i < segments.Length)
@@ -1047,7 +1121,7 @@ namespace CBoxTTS.Native
 
         /// <summary>
         /// 英語専用: 短い文を前の文に結合し、チャンク数を削減して流暢性を向上させる。
-        /// 各チャンクが maxChunkLength を超えない範囲で文を結合する。
+        /// ただし、数字マーカー(1, や 2. など)は他の文と結合せず独立したチャンクとする。
         /// </summary>
         private List<string> MergeShortSentencesForEnglish(List<string> sentences, int maxChunkLength)
         {
@@ -1058,22 +1132,38 @@ namespace CBoxTTS.Native
 
             foreach (var sentence in sentences)
             {
-                if (current.Length == 0)
+                bool isMarker = IsNumberMarker(sentence);
+                
+                if (isMarker)
                 {
-                    current.Append(sentence);
-                }
-                else if (current.Length + 1 + sentence.Length <= maxChunkLength)
-                {
-                    // 結合してもチャンク上限内なら結合
-                    current.Append(" ");
-                    current.Append(sentence);
+                    // 数字マーカーを発見した場合、構築中のチャンクがあれば一旦確定する
+                    if (current.Length > 0)
+                    {
+                        merged.Add(current.ToString());
+                        current.Clear();
+                    }
+                    // 数字マーカーは単独チャンクとして追加
+                    merged.Add(sentence);
                 }
                 else
                 {
-                    // 上限を超えるなら現在のチャンクを確定し、新しいチャンクを開始
-                    merged.Add(current.ToString());
-                    current.Clear();
-                    current.Append(sentence);
+                    if (current.Length == 0)
+                    {
+                        current.Append(sentence);
+                    }
+                    else if (current.Length + 1 + sentence.Length <= maxChunkLength && !IsNumberMarker(current.ToString()))
+                    {
+                        // 結合してもチャンク上限内なら結合
+                        current.Append(" ");
+                        current.Append(sentence);
+                    }
+                    else
+                    {
+                        // 上限を超える、または直前の確定分が数字マーカーなら新規開始
+                        merged.Add(current.ToString());
+                        current.Clear();
+                        current.Append(sentence);
+                    }
                 }
             }
 

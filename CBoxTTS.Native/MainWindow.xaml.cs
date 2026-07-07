@@ -24,6 +24,17 @@ namespace CBoxTTS.Native
             InitializeComponent();
             ApplyBuildSpecificUI();
             Loaded += MainWindow_Loaded;
+            
+            _audio.PlaybackStopped += () =>
+            {
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (StatusText.Text == GetMsg("再生中...", "Playing..."))
+                    {
+                        StatusText.Text = GetMsg("準備完了", "Ready");
+                    }
+                });
+            };
         }
 
         private void ApplyBuildSpecificUI()
@@ -189,9 +200,9 @@ namespace CBoxTTS.Native
                 // モデルの種類に応じて RepetitionPenaltySlider のデフォルト値を自動セット
                 float defaultRepetitionPenalty = selectedType switch
                 {
-                    ModelType.Turbo => 1.15f,
-                    ModelType.English => 1.1f,
-                    _ => 1.1f
+                    ModelType.Turbo => 1.2f,
+                    ModelType.English => 1.2f,
+                    _ => 1.15f
                 };
                 if (RepetitionPenaltySlider != null)
                 {
@@ -237,13 +248,14 @@ namespace CBoxTTS.Native
             }
             catch (Exception ex)
             {
+                _isInitialized = false; // 初期化状態をクリアして、壊れたモデルが使われないようにする
                 ShowError(ex);
             }
             finally
             {
                 _isApplyingSettings = false;
-                PlayButton.IsEnabled = true;
-                SaveButton.IsEnabled = true;
+                PlayButton.IsEnabled = _isInitialized; // ロードに成功している場合のみ有効化する
+                SaveButton.IsEnabled = _isInitialized;
                 if (LanguageCombo != null) LanguageCombo.IsEnabled = true;
                 if (ModelCombo != null) ModelCombo.IsEnabled = true;
                 StatusProgress.Visibility = Visibility.Collapsed;
@@ -528,7 +540,7 @@ namespace CBoxTTS.Native
         {
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
-                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                string[]? files = e.Data.GetData(DataFormats.FileDrop) as string[];
                 if (files != null && files.Length > 0)
                 {
                     string file = files[0];
@@ -633,6 +645,11 @@ namespace CBoxTTS.Native
                     voicePath = Path.Combine(AppContext.BaseDirectory, "models", voicePath);
                 }
 
+                if (!File.Exists(voicePath))
+                {
+                    throw new FileNotFoundException(GetMsg($"参照音声ファイルが見つかりません:\n{voicePath}", $"Reference voice file not found:\n{voicePath}"));
+                }
+
                 long langToken = GetCurrentLangToken();
 
                 var wav = await Task.Run(async () =>
@@ -647,7 +664,6 @@ namespace CBoxTTS.Native
 
                 StatusText.Text = GetMsg("再生中...", "Playing...");
                 _audio.Play(wav, speed);
-                StatusText.Text = GetMsg("準備完了", "Ready");
             }
             catch (Exception ex)
             {
@@ -720,6 +736,11 @@ namespace CBoxTTS.Native
                     if (!Path.IsPathRooted(voicePath))
                     {
                         voicePath = Path.Combine(AppContext.BaseDirectory, "models", voicePath);
+                    }
+
+                    if (!File.Exists(voicePath))
+                    {
+                        throw new FileNotFoundException(GetMsg($"参照音声ファイルが見つかりません:\n{voicePath}", $"Reference voice file not found:\n{voicePath}"));
                     }
 
                     long langToken = GetCurrentLangToken();

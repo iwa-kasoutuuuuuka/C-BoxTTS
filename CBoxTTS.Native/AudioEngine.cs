@@ -11,6 +11,8 @@ namespace CBoxTTS.Native
         private IWavePlayer? _player;
         private readonly int _sampleRate = 24000;
 
+        public event Action? PlaybackStopped;
+
         public void Play(float[] audioData, float speed = 1.0f)
         {
             Stop();
@@ -19,7 +21,12 @@ namespace CBoxTTS.Native
 
             // float配列をSampleProviderとして扱う
             var sampleProvider = new ISampleProvider[] { new RawSampleProvider(processedData, _sampleRate) };
-            _player = new WaveOutEvent();
+            var player = new WaveOutEvent();
+            player.PlaybackStopped += (s, e) =>
+            {
+                PlaybackStopped?.Invoke();
+            };
+            _player = player;
             _player.Init(sampleProvider[0]);
             _player.Play();
         }
@@ -28,9 +35,10 @@ namespace CBoxTTS.Native
         {
             if (_player != null)
             {
-                _player.Stop();
-                _player.Dispose();
-                _player = null;
+                var playerTemp = _player;
+                _player = null; // 再入や競合を防ぐため先に null 代入
+                playerTemp.Stop();
+                playerTemp.Dispose();
             }
         }
 

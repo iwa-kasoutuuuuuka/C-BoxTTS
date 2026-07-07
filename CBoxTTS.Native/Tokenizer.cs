@@ -275,7 +275,7 @@ namespace CBoxTTS.Native
         {
             if (string.IsNullOrEmpty(text))
             {
-                return "You need to add some text for me to talk.";
+                return text;
             }
 
             // 余分なスペースの統合
@@ -286,7 +286,7 @@ namespace CBoxTTS.Native
             // 時刻パターン（例: 3:00, 12:30）を保護してからコロン変換を行う
             // プレースホルダに置換 → コロン変換 → プレースホルダを復元
             merged = System.Text.RegularExpressions.Regex.Replace(
-                merged, @"(\d{1,2}):(\d{2})", "$1\x00COLON\x00$2");
+                merged, @"(\d{1,2}):(\d{2})", "$1\uE000COLON\uE000$2");
 
             var puncToReplace = new (string Old, string New)[]
             {
@@ -310,7 +310,7 @@ namespace CBoxTTS.Native
             }
 
             // 時刻パターンのプレースホルダを復元
-            merged = merged.Replace("\x00COLON\x00", ":");
+            merged = merged.Replace("\uE000COLON\uE000", ":");
 
             merged = merged.TrimEnd();
 
