@@ -141,7 +141,24 @@ namespace CBoxTTS.Native
                     Console.WriteLine($"  [Load] {msg} ({pct:F1}%)");
                 });
 
-                string textEn = "I have 12 apples, Mr. Smith. NASA works with FBI. IT IS A WONDERFUL DAY.";
+                string textEn = @"In this LINE, the inspector makes a judgment using images for monitoring.
+This system uses the multi-line random triggering function of FH.
+By setting up the imaging station and the monitor inspection station on
+separate lines using a multi-line random trigger function,
+imaging and monitor inspection can be processed in parallel.
+This prevents the entire system from shutting down due to waiting for
+inspector's judgment,
+allowing processing to proceed efficiently and asynchronously.
+Next is explanation about monitoring process between LINE0 and LINE3.
+1, Images taken on the imaging line are processed for monitor inspection and
+saved to the RAM disk of the FH controller.
+2,,The monitor inspection line reads the image from the RAMDISK memory and
+displays the image on the monitor.
+3,,, Next, the inspector looks at the image on the monitor and makes a
+judgment of OK or NG. If there are any defects,
+you can also enter details such as ""scratches"" or ""burrs.""
+4,Finally, the captured images and inspection results are saved to external
+storage.";
                 Console.WriteLine($"[English EN Test] Input: {textEn}");
                 float[] wavEn = await engine.GenerateBatchAsync(textEn, voicePath, 0.5f, 0.5f,
                     morph, tokenizer, 1, 0.5f, 1.1f, msg => Console.WriteLine($"  [English EN Status] {msg}"));

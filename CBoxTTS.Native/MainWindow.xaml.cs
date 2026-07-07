@@ -132,11 +132,13 @@ namespace CBoxTTS.Native
                 // 初回ロード (初期設定に基づく)
                 await ApplyModelSettingsAsync();
 
+                _isInitialized = true;
+                PlayButton.IsEnabled = true;
+                SaveButton.IsEnabled = true;
                 StatusText.Text = GetMsg("準備完了", "Ready");
                 StatusText.Foreground = System.Windows.Media.Brushes.LightGreen;
                 StatusProgress.Visibility = Visibility.Collapsed;
                 UpdateModelComboItemsAvailability(LanguageCombo.SelectedIndex);
-                _isInitialized = true;
             }
             catch (Exception ex)
             {
