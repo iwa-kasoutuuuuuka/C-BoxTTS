@@ -28,8 +28,9 @@ namespace CBoxTTS.Native
 
         private readonly string _modelsDir;
         private ModelType _currentModelType = ModelType.Multilingual;
+        public string ActiveBackend { get; private set; } = "None";
         
-        // embed_tokens.onnx のEmbedding行列の語彙サイズ（LoadModel 時に自動検出）
+        // embed_tokens.onnx のEmbedding行列の語彙サイズ（LoadModel 優先時自動検出）
         private long _embedVocabSize = -1;
 
         // モデルごとのファイル定義
@@ -215,6 +216,8 @@ namespace CBoxTTS.Native
                 string lmFile = GetLMFileName(type);
                 string[] baseModelFiles = { "speech_encoder.onnx", "embed_tokens.onnx", "conditional_decoder.onnx", lmFile };
                 
+                string detectedBackend = "CPU";
+
                 for (int i = 0; i < baseModelFiles.Length; i++)
                 {
                     string baseName = baseModelFiles[i];
@@ -241,9 +244,59 @@ namespace CBoxTTS.Native
                     {
                         try
                         {
-                            var cpuOptions = new SessionOptions();
-                            session = new InferenceSession(path, cpuOptions);
+                            var options = new SessionOptions();
+#if USE_CUDA
+                            try
+                            {
+                                using (var cudaProviderOptions = new OrtCUDAProviderOptions())
+                                {
+                                    var providerOptionsDict = new Dictionary<string, string>
+                                    {
+                                        { "device_id", "0" },
+                                        { "cudnn_conv_use_max_workspace", "1" },
+                                        { "cudnn_conv_algo_search", "EXHAUSTIVE" }
+                                    };
+                                    cudaProviderOptions.UpdateOptions(providerOptionsDict);
+                                    options.AppendExecutionProvider_CUDA(cudaProviderOptions);
+                                }
+                                session = new InferenceSession(path, options);
+                                detectedBackend = "CUDA";
+                                Log($"[Session成功:CUDA] {baseName}");
+                            }
+                            catch (Exception cudaEx)
+                            {
+                                Log($"[CUDA初期化失敗、CPUにフォールバックします] {baseName}: {cudaEx.Message}");
+                                options.Dispose();
+                                options = new SessionOptions();
+                                options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                                session = new InferenceSession(path, options);
+                                detectedBackend = "CPU (Fallback)";
+                                Log($"[Session成功:CPU (CUDAフォールバック)] {baseName}");
+                            }
+#elif USE_DML
+                            try
+                            {
+                                options.AppendExecutionProvider_DML(0);
+                                session = new InferenceSession(path, options);
+                                detectedBackend = "DirectML";
+                                Log($"[Session成功:DirectML] {baseName}");
+                            }
+                            catch (Exception dmlEx)
+                            {
+                                Log($"[DirectML初期化失敗、CPUにフォールバックします] {baseName}: {dmlEx.Message}");
+                                options.Dispose();
+                                options = new SessionOptions();
+                                options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                                session = new InferenceSession(path, options);
+                                detectedBackend = "CPU (Fallback)";
+                                Log($"[Session成功:CPU (DirectMLフォールバック)] {baseName}");
+                            }
+#else
+                            options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                            session = new InferenceSession(path, options);
+                            detectedBackend = "CPU";
                             Log($"[Session成功:CPU] {baseName}");
+#endif
                             break;
                         }
                         catch (Exception ex) when (ex.Message.Contains("errcode = 32") || ex.Message.Contains("access") || ex.Message.Contains("locked") || ex.Message.Contains("使用中"))
@@ -269,17 +322,10 @@ namespace CBoxTTS.Native
                     {
                         _embedTokens = session;
                         // embed_tokens.onnx のEmbedding行列の語彙サイズを検出する。
-                        // input_ids の Gather ノードが参照する重み行列の行数がモデルの語彙上限を決定する。
-                        // OutputMetadata の inputs_embeds の Shape から推測する:
-                        // 通常 Shape は [1, seq_len, embed_dim] なので embed_dim を取得。
-                        // InputMetadata の input_ids Shape の最初の次元から vocab_size が推測可能な場合もあるが、
-                        // 確実な方法はモデルファイルの重みを解析するか、試行錯誤で検出する必要がある。
-                        // ここでは、English モデル（語彙704）と Multilingual モデル（語彙2454+）を区別するために
-                        // モデルタイプから静的に設定する。
                         _embedVocabSize = type switch
                         {
                             ModelType.English => 704,   // chatterbox-ONNX の embed_tokens は 704 行
-                            ModelType.Turbo => 6563,    // chatterbox-turbo-ONNX
+                            ModelType.Turbo => 50257,   // chatterbox-turbo-ONNX
                             _ => 2454                   // chatterbox-multilingual-ONNX
                         };
                         Log($"[embed_tokens] モデルタイプ {type} の Embedding 語彙サイズを設定: {_embedVocabSize}");
@@ -302,7 +348,8 @@ namespace CBoxTTS.Native
                 }
                 
                 _currentModelType = type;
-                Log($"=== 全エンジンのロードに成功しました (Embedding語彙サイズ: {_embedVocabSize}) ===");
+                ActiveBackend = detectedBackend;
+                Log($"=== 全エンジンのロードに成功しました (Embedding語彙サイズ: {_embedVocabSize}, バックエンド: {ActiveBackend}) ===");
             }
             catch (Exception ex)
             {
@@ -522,249 +569,557 @@ namespace CBoxTTS.Native
                 }
                 Log($"言語モデルのKVレイヤー数を検出しました: {numKvLayers} レイヤー");
 
-                // 過去のKey/Valueキャッシュの初期化（条件付きパス）
-                var pastKeyValues = new Dictionary<string, DenseTensor<float>>();
-                for (int i = 0; i < numKvLayers; i++)
-                {
-                    pastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
-                    pastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
-                }
-
-                // CFG用の無条件パスKVキャッシュ
-                var uncondPastKeyValues = new Dictionary<string, DenseTensor<float>>();
-                if (useCfg)
-                {
-                    for (int i = 0; i < numKvLayers; i++)
-                    {
-                        uncondPastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
-                        uncondPastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
-                    }
-                }
-
                 // generate_tokens の初期化
                 var generateTokens = new List<long> { startSpeechToken };
                 
                 int maxNewTokens = 760; // 安全のための最大トークン制限（英語長文でも途中打ち切りを防ぐ）
                 Log("自己回帰ループ開始...");
-                
-                for (int step = 0; step < maxNewTokens; step++)
+
+                if (ActiveBackend == "CUDA")
                 {
-                    var lmInputs = new List<NamedOnnxValue>
+                    var cudaPastKeyValues = new Dictionary<string, OrtValue>();
+                    var cudaUncondPastKeyValues = new Dictionary<string, OrtValue>();
+
+                    try
                     {
-                        NamedOnnxValue.CreateFromTensor("inputs_embeds", currentEmbeds),
-                        NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
-                    };
-                    
-                    DenseTensor<long>? posTensor = null;
-                    if (_languageModel.InputMetadata.ContainsKey("position_ids"))
-                    {
-                        // 1ステップ目 (step == 0) の position_ids は arange(totalSeqLen) となる
-                        long[] posIds;
-                        if (step == 0)
+                        var cpuMemInfo = OrtMemoryInfo.DefaultInstance;
+                        var cudaMemInfo = new OrtMemoryInfo("Cuda", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default);
+                        var outputNames = _languageModel.OutputNames.ToArray();
+
+                        // 空のテンソルを初期値としてGPUキャッシュを構成 (0バイトなのでCPUで作成して問題なし)
+                        var emptyArr = new float[0];
+                        var emptyDims = new long[] { 1, 16, 0, 64 };
+                        for (int i = 0; i < numKvLayers; i++)
                         {
-                            posIds = new long[totalSeqLen];
-                            for (int p = 0; p < totalSeqLen; p++) posIds[p] = (long)p;
+                            cudaPastKeyValues[$"past_key_values.{i}.key"] = OrtValue.CreateTensorValueFromMemory<float>(emptyArr, emptyDims);
+                            cudaPastKeyValues[$"past_key_values.{i}.value"] = OrtValue.CreateTensorValueFromMemory<float>(emptyArr, emptyDims);
+                            if (useCfg)
+                            {
+                                cudaUncondPastKeyValues[$"past_key_values.{i}.key"] = OrtValue.CreateTensorValueFromMemory<float>(emptyArr, emptyDims);
+                                cudaUncondPastKeyValues[$"past_key_values.{i}.value"] = OrtValue.CreateTensorValueFromMemory<float>(emptyArr, emptyDims);
+                            }
+                        }
+
+                        // ボキャブラリーサイズをメタデータから検出
+                        int vocabSize = 8194;
+                        var lmOutputMetadata = _languageModel.OutputMetadata;
+                        if (lmOutputMetadata.ContainsKey("logits"))
+                        {
+                            vocabSize = (int)lmOutputMetadata["logits"].Dimensions[2];
+                        }
+
+                        float[] condLogits = new float[vocabSize];
+                        float[] uncondLogits = new float[vocabSize];
+                        float[] step0LogitsBuffer = null;
+                        float[] uncondStep0LogitsBuffer = null;
+
+                        for (int step = 0; step < maxNewTokens; step++)
+                        {
+                            DenseTensor<long>? posTensor = null;
+                            if (_languageModel.InputMetadata.ContainsKey("position_ids"))
+                            {
+                                long[] posIds;
+                                if (step == 0)
+                                {
+                                    posIds = new long[totalSeqLen];
+                                    for (int p = 0; p < totalSeqLen; p++) posIds[p] = (long)p;
+                                }
+                                else
+                                {
+                                    posIds = new long[] { (long)(totalSeqLen - 1) };
+                                }
+                                posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
+                            }
+
+                            // ----------------- 1. 条件付きパスの推論 -----------------
+                            using (var ioBinding = _languageModel.CreateIoBinding())
+                            {
+                                using var currentEmbedsOrt = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, currentEmbeds.Buffer, currentEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                using var currentMaskOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, currentMask.Buffer, currentMask.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                ioBinding.BindInput("inputs_embeds", currentEmbedsOrt);
+                                ioBinding.BindInput("attention_mask", currentMaskOrt);
+
+                                OrtValue? posTensorOrt = null;
+                                try
+                                {
+                                    if (posTensor != null)
+                                    {
+                                        posTensorOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, posTensor.Buffer, posTensor.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                        ioBinding.BindInput("position_ids", posTensorOrt);
+                                    }
+
+                                    for (int i = 0; i < numKvLayers; i++)
+                                    {
+                                        ioBinding.BindInput($"past_key_values.{i}.key", cudaPastKeyValues[$"past_key_values.{i}.key"]);
+                                        ioBinding.BindInput($"past_key_values.{i}.value", cudaPastKeyValues[$"past_key_values.{i}.value"]);
+                                    }
+
+                                    // logitsをCPUバッファにバインド（CPU-GPU転送をこの32KBの配列のみに限定）
+                                    OrtValue logitsOrtValue;
+                                    if (step == 0)
+                                    {
+                                        step0LogitsBuffer = new float[totalSeqLen * vocabSize];
+                                        logitsOrtValue = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, step0LogitsBuffer, new long[] { 1, totalSeqLen, vocabSize });
+                                    }
+                                    else
+                                    {
+                                        logitsOrtValue = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, condLogits, new long[] { 1, 1, vocabSize });
+                                    }
+                                    ioBinding.BindOutput("logits", logitsOrtValue);
+
+                                    // KVキャッシュ出力はGPUメモリに直接書き込み
+                                    for (int i = 0; i < numKvLayers; i++)
+                                    {
+                                        ioBinding.BindOutputToDevice($"present.{i}.key", cudaMemInfo);
+                                        ioBinding.BindOutputToDevice($"present.{i}.value", cudaMemInfo);
+                                    }
+
+                                    _languageModel.RunWithBinding(new RunOptions(), ioBinding);
+
+                                    var outputsList = ioBinding.GetOutputValues();
+                                    var outputsMap = new Dictionary<string, OrtValue>();
+                                    for (int idx = 0; idx < outputNames.Length; idx++)
+                                    {
+                                        outputsMap[outputNames[idx]] = outputsList[idx];
+                                    }
+
+                                    // 古いKVキャッシュOrtValueを解放し、新しいGPU上のOrtValueへの所有権を移譲（コピーなし）
+                                    for (int i = 0; i < numKvLayers; i++)
+                                    {
+                                        cudaPastKeyValues[$"past_key_values.{i}.key"].Dispose();
+                                        cudaPastKeyValues[$"past_key_values.{i}.value"].Dispose();
+                                        cudaPastKeyValues[$"past_key_values.{i}.key"] = outputsMap[$"present.{i}.key"];
+                                        cudaPastKeyValues[$"past_key_values.{i}.value"] = outputsMap[$"present.{i}.value"];
+                                    }
+
+                                    // 使わなかった出力（logitsなど）を明示的に破棄
+                                    foreach (var name in outputNames)
+                                    {
+                                        if (name == "logits" || name.StartsWith("present")) continue;
+                                        outputsMap[name].Dispose();
+                                    }
+
+                                    logitsOrtValue.Dispose();
+                                }
+                                finally
+                                {
+                                    posTensorOrt?.Dispose();
+                                }
+                            }
+
+                            if (step == 0)
+                            {
+                                for (int v = 0; v < vocabSize; v++)
+                                {
+                                    condLogits[v] = step0LogitsBuffer[(totalSeqLen - 1) * vocabSize + v];
+                                }
+                            }
+
+                            // ----------------- 2. 無条件パス（CFG）の推論 -----------------
+                            float[] logits;
+                            if (useCfg)
+                            {
+                                DenseTensor<float> uncondCurrentEmbeds = (step == 0) ? uncondEmbeds! : currentEmbeds;
+                                using (var uncondIoBinding = _languageModel.CreateIoBinding())
+                                {
+                                    using var uncondCurrentEmbedsOrt = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, uncondCurrentEmbeds.Buffer, uncondCurrentEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                    using var currentMaskOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, currentMask.Buffer, currentMask.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                    uncondIoBinding.BindInput("inputs_embeds", uncondCurrentEmbedsOrt);
+                                    uncondIoBinding.BindInput("attention_mask", currentMaskOrt);
+
+                                    OrtValue? posTensorOrt = null;
+                                    try
+                                    {
+                                        if (posTensor != null)
+                                        {
+                                            posTensorOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, posTensor.Buffer, posTensor.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                            uncondIoBinding.BindInput("position_ids", posTensorOrt);
+                                        }
+
+                                        for (int i = 0; i < numKvLayers; i++)
+                                        {
+                                            uncondIoBinding.BindInput($"past_key_values.{i}.key", cudaUncondPastKeyValues[$"past_key_values.{i}.key"]);
+                                            uncondIoBinding.BindInput($"past_key_values.{i}.value", cudaUncondPastKeyValues[$"past_key_values.{i}.value"]);
+                                        }
+
+                                        OrtValue uncondLogitsOrtValue;
+                                        if (step == 0)
+                                        {
+                                            uncondStep0LogitsBuffer = new float[totalSeqLen * vocabSize];
+                                            uncondLogitsOrtValue = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, uncondStep0LogitsBuffer, new long[] { 1, totalSeqLen, vocabSize });
+                                        }
+                                        else
+                                        {
+                                            uncondLogitsOrtValue = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, uncondLogits, new long[] { 1, 1, vocabSize });
+                                        }
+                                        uncondIoBinding.BindOutput("logits", uncondLogitsOrtValue);
+
+                                        for (int i = 0; i < numKvLayers; i++)
+                                        {
+                                            uncondIoBinding.BindOutputToDevice($"present.{i}.key", cudaMemInfo);
+                                            uncondIoBinding.BindOutputToDevice($"present.{i}.value", cudaMemInfo);
+                                        }
+
+                                        _languageModel.RunWithBinding(new RunOptions(), uncondIoBinding);
+
+                                        var uncondOutputsList = uncondIoBinding.GetOutputValues();
+                                        var uncondOutputsMap = new Dictionary<string, OrtValue>();
+                                        for (int idx = 0; idx < outputNames.Length; idx++)
+                                        {
+                                            uncondOutputsMap[outputNames[idx]] = uncondOutputsList[idx];
+                                        }
+
+                                        for (int i = 0; i < numKvLayers; i++)
+                                        {
+                                            cudaUncondPastKeyValues[$"past_key_values.{i}.key"].Dispose();
+                                            cudaUncondPastKeyValues[$"past_key_values.{i}.value"].Dispose();
+                                            cudaUncondPastKeyValues[$"past_key_values.{i}.key"] = uncondOutputsMap[$"present.{i}.key"];
+                                            cudaUncondPastKeyValues[$"past_key_values.{i}.value"] = uncondOutputsMap[$"present.{i}.value"];
+                                        }
+
+                                        foreach (var name in outputNames)
+                                        {
+                                            if (name == "logits" || name.StartsWith("present")) continue;
+                                            uncondOutputsMap[name].Dispose();
+                                        }
+
+                                        uncondLogitsOrtValue.Dispose();
+                                    }
+                                    finally
+                                    {
+                                        posTensorOrt?.Dispose();
+                                    }
+                                }
+
+                                if (step == 0)
+                                {
+                                    for (int v = 0; v < vocabSize; v++)
+                                    {
+                                        uncondLogits[v] = uncondStep0LogitsBuffer[(totalSeqLen - 1) * vocabSize + v];
+                                    }
+                                }
+
+                                logits = new float[vocabSize];
+                                for (int v = 0; v < vocabSize; v++)
+                                {
+                                    logits[v] = condLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
+                                }
+                            }
+                            else
+                            {
+                                logits = condLogits;
+                            }
+
+                            // ----------------- 3. ペナルティの適用とサンプリング -----------------
+                            var uniqueTokens = new HashSet<long>(generateTokens);
+                            foreach (long tokenId in uniqueTokens)
+                            {
+                                if (tokenId >= 0 && tokenId < vocabSize)
+                                {
+                                    if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
+                                    else logits[tokenId] /= repetitionPenalty;
+                                }
+                            }
+
+                            const int recentWindow = 64;
+                            float strongPenalty = repetitionPenalty * 1.3f;
+                            int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
+                            var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
+                            foreach (long tokenId in recentTokens)
+                            {
+                                if (tokenId >= 0 && tokenId < vocabSize)
+                                {
+                                    if (logits[tokenId] < 0) logits[tokenId] *= strongPenalty;
+                                    else logits[tokenId] /= strongPenalty;
+                                }
+                            }
+
+                            if (generateTokens.Count >= 16)
+                            {
+                                bool loopDetected = false;
+                                int checkCount = Math.Min(generateTokens.Count, 48);
+                                var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
+                                for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
+                                {
+                                    if (recent.Length < patLen * 3) continue;
+                                    var tail = recent.Skip(recent.Length - patLen).ToArray();
+                                    int matchCount = 1;
+                                    for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
+                                    {
+                                        bool match = true;
+                                        for (int k = 0; k < patLen; k++)
+                                        {
+                                            if (recent[pos + k] != tail[k]) { match = false; break; }
+                                        }
+                                        if (match) matchCount++;
+                                    }
+                                    if (matchCount >= 3)
+                                    {
+                                        Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
+                                        loopDetected = true;
+                                    }
+                                }
+                                if (loopDetected) break;
+                            }
+
+                            long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                            generateTokens.Add(nextToken);
+
+                            if (nextToken == stopSpeechToken)
+                            {
+                                Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
+                                break;
+                            }
+
+                            if (step < 20 || step % 50 == 0)
+                            {
+                                Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
+                            }
+
+                            // 次の入力埋め込みを生成
+                            var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
+                            var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
+                            var nextEmbedInputs = new List<NamedOnnxValue>
+                            {
+                                NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
+                            };
+                            if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                            {
+                                nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor));
+                            }
+                            if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                            {
+                                nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                            }
+                            using var nextEmbedResults = _embedTokens.Run(nextEmbedInputs);
+                            currentEmbeds = CloneTensor(nextEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
+
+                            var newMaskValues = currentMask.ToArray().Concat(new[] { 1L }).ToArray();
+                            currentMask = new DenseTensor<long>(newMaskValues, new[] { 1, newMaskValues.Length });
+
+                            totalSeqLen++;
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var val in cudaPastKeyValues.Values) val.Dispose();
+                        foreach (var val in cudaUncondPastKeyValues.Values) val.Dispose();
+                    }
+                }
+                else
+                {
+                    // CPU / DirectML フォールバックパス
+                    var pastKeyValues = new Dictionary<string, DenseTensor<float>>();
+                    for (int i = 0; i < numKvLayers; i++)
+                    {
+                        pastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                        pastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                    }
+
+                    var uncondPastKeyValues = new Dictionary<string, DenseTensor<float>>();
+                    if (useCfg)
+                    {
+                        for (int i = 0; i < numKvLayers; i++)
+                        {
+                            uncondPastKeyValues[$"past_key_values.{i}.key"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                            uncondPastKeyValues[$"past_key_values.{i}.value"] = new DenseTensor<float>(new float[0], new[] { 1, 16, 0, 64 });
+                        }
+                    }
+
+                    int vocabSize = 8194;
+                    var lmOutputMetadata = _languageModel.OutputMetadata;
+                    if (lmOutputMetadata.ContainsKey("logits"))
+                    {
+                        vocabSize = (int)lmOutputMetadata["logits"].Dimensions[2];
+                    }
+
+                    for (int step = 0; step < maxNewTokens; step++)
+                    {
+                        var lmInputs = new List<NamedOnnxValue>
+                        {
+                            NamedOnnxValue.CreateFromTensor("inputs_embeds", currentEmbeds),
+                            NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
+                        };
+                        
+                        DenseTensor<long>? posTensor = null;
+                        if (_languageModel.InputMetadata.ContainsKey("position_ids"))
+                        {
+                            long[] posIds;
+                            if (step == 0)
+                            {
+                                posIds = new long[totalSeqLen];
+                                for (int p = 0; p < totalSeqLen; p++) posIds[p] = (long)p;
+                            }
+                            else
+                            {
+                                posIds = new long[] { (long)(totalSeqLen - 1) };
+                            }
+                            posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
+                            lmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
+                        }
+
+                        for (int i = 0; i < numKvLayers; i++)
+                        {
+                            lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", pastKeyValues[$"past_key_values.{i}.key"]));
+                            lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", pastKeyValues[$"past_key_values.{i}.value"]));
+                        }
+
+                        using var lmResults = _languageModel.Run(lmInputs);
+                        var logitsTensor = lmResults.First(o => o.Name == "logits").AsTensor<float>();
+
+                        for (int i = 0; i < numKvLayers; i++)
+                        {
+                            var presentKey = lmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
+                            var presentVal = lmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
+                            pastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
+                            pastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
+                        }
+
+                        int seqLen = logitsTensor.Dimensions[1];
+                        float[] condLogits = new float[vocabSize];
+                        for (int v = 0; v < vocabSize; v++)
+                        {
+                            condLogits[v] = logitsTensor[0, seqLen - 1, v];
+                        }
+
+                        float[] logits;
+                        if (useCfg)
+                        {
+                            DenseTensor<float> uncondCurrentEmbeds = (step == 0) ? uncondEmbeds! : currentEmbeds;
+                            var uncondLmInputs = new List<NamedOnnxValue>
+                            {
+                                NamedOnnxValue.CreateFromTensor("inputs_embeds", uncondCurrentEmbeds),
+                                NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
+                            };
+
+                            if (posTensor != null)
+                            {
+                                uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
+                            }
+
+                            for (int i = 0; i < numKvLayers; i++)
+                            {
+                                uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", uncondPastKeyValues[$"past_key_values.{i}.key"]));
+                                uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", uncondPastKeyValues[$"past_key_values.{i}.value"]));
+                            }
+
+                            using var uncondLmResults = _languageModel.Run(uncondLmInputs);
+                            var uncondLogitsTensor = uncondLmResults.First(o => o.Name == "logits").AsTensor<float>();
+
+                            for (int i = 0; i < numKvLayers; i++)
+                            {
+                                var presentKey = uncondLmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
+                                var presentVal = uncondLmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
+                                uncondPastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
+                                uncondPastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
+                            }
+
+                            int uncondSeqLenOut = uncondLogitsTensor.Dimensions[1];
+                            float[] uncondLogits = new float[vocabSize];
+                            for (int v = 0; v < vocabSize; v++)
+                            {
+                                uncondLogits[v] = uncondLogitsTensor[0, uncondSeqLenOut - 1, v];
+                            }
+
+                            logits = new float[vocabSize];
+                            for (int v = 0; v < vocabSize; v++)
+                            {
+                                logits[v] = condLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
+                            }
                         }
                         else
                         {
-                            // 2ステップ目以降 (step > 0) は生成された最新1トークン分なので [ [totalSeqLen - 1] ]
-                            posIds = new long[] { (long)(totalSeqLen - 1) };
-                        }
-                        posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
-                        lmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
-                    }
-
-                     for (int i = 0; i < numKvLayers; i++)
-                     {
-                         lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", pastKeyValues[$"past_key_values.{i}.key"]));
-                         lmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", pastKeyValues[$"past_key_values.{i}.value"]));
-                     }
- 
-                     using var lmResults = _languageModel.Run(lmInputs);
-                     var logitsTensor = lmResults.First(o => o.Name == "logits").AsTensor<float>();
- 
-                     // 次のステップ用にKVキャッシュを更新
-                     for (int i = 0; i < numKvLayers; i++)
-                     {
-                         var presentKey = lmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
-                         var presentVal = lmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
-                         pastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
-                         pastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
-                     }
-
-                    // 最後のステップのLogitsを取得（条件付きパス）
-                    int seqLen = logitsTensor.Dimensions[1];
-                    int vocabSize = logitsTensor.Dimensions[2];
-                    
-                    // 条件付きLogitsを配列に抽出（最後のタイムステップのみ）
-                    float[] condLogits = new float[vocabSize];
-                    for (int v = 0; v < vocabSize; v++)
-                    {
-                        condLogits[v] = logitsTensor[0, seqLen - 1, v];
-                    }
-
-                    // CFG: 無条件パスの実行と補間
-                    float[] logits;
-                    if (useCfg)
-                    {
-                        // 無条件パスの言語モデル入力を構築
-                        DenseTensor<float> uncondCurrentEmbeds = (step == 0) ? uncondEmbeds! : currentEmbeds;
-                        // マスクと位置IDは条件付きパスと完全に同一なため、そのまま使い回す
-                        var uncondLmInputs = new List<NamedOnnxValue>
-                        {
-                            NamedOnnxValue.CreateFromTensor("inputs_embeds", uncondCurrentEmbeds),
-                            NamedOnnxValue.CreateFromTensor("attention_mask", currentMask)
-                        };
-
-                        if (posTensor != null)
-                        {
-                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
+                            logits = condLogits;
                         }
 
-                        for (int i = 0; i < numKvLayers; i++)
+                        var uniqueTokens = new HashSet<long>(generateTokens);
+                        foreach (long tokenId in uniqueTokens)
                         {
-                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.key", uncondPastKeyValues[$"past_key_values.{i}.key"]));
-                            uncondLmInputs.Add(NamedOnnxValue.CreateFromTensor($"past_key_values.{i}.value", uncondPastKeyValues[$"past_key_values.{i}.value"]));
-                        }
-
-                        using var uncondLmResults = _languageModel.Run(uncondLmInputs);
-                        var uncondLogitsTensor = uncondLmResults.First(o => o.Name == "logits").AsTensor<float>();
-
-                        // 無条件KVキャッシュを更新
-                        for (int i = 0; i < numKvLayers; i++)
-                        {
-                            var presentKey = uncondLmResults.First(o => o.Name == $"present.{i}.key").AsTensor<float>();
-                            var presentVal = uncondLmResults.First(o => o.Name == $"present.{i}.value").AsTensor<float>();
-                            uncondPastKeyValues[$"past_key_values.{i}.key"] = CloneTensor(presentKey);
-                            uncondPastKeyValues[$"past_key_values.{i}.value"] = CloneTensor(presentVal);
-                        }
-
-                        // 無条件Logitsを抽出
-                        int uncondSeqLenOut = uncondLogitsTensor.Dimensions[1];
-                        float[] uncondLogits = new float[vocabSize];
-                        for (int v = 0; v < vocabSize; v++)
-                        {
-                            uncondLogits[v] = uncondLogitsTensor[0, uncondSeqLenOut - 1, v];
-                        }
-
-                        // CFG補間: final = cond + cfg_weight * (cond - uncond) (リファレンス準拠)
-                        logits = new float[vocabSize];
-                        for (int v = 0; v < vocabSize; v++)
-                        {
-                            logits[v] = condLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
-                        }
-                    }
-                    else
-                    {
-                        // CFG無効: 条件付きLogitsをそのまま使用
-                        logits = condLogits;
-                    }
-
-                    // 反復ペナルティの適用（二段階方式）
-                    // 1段目: 全生成履歴に対して標準ペナルティを適用
-                    var uniqueTokens = new HashSet<long>(generateTokens);
-                    foreach (long tokenId in uniqueTokens)
-                    {
-                        if (tokenId >= 0 && tokenId < vocabSize)
-                        {
-                            if (logits[tokenId] < 0)
-                                logits[tokenId] *= repetitionPenalty;
-                            else
-                                logits[tokenId] /= repetitionPenalty;
-                        }
-                    }
-                    // 2段目: 直近64トークンに出現したものへは追加の強化ペナルティを適用
-                    // ループ発生時の「同じパターンの繰り返し」を強力に抑制する
-                    const int recentWindow = 64;
-                    float strongPenalty = repetitionPenalty * 1.3f;
-                    int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
-                    var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
-                    foreach (long tokenId in recentTokens)
-                    {
-                        if (tokenId >= 0 && tokenId < vocabSize)
-                        {
-                            if (logits[tokenId] < 0)
-                                logits[tokenId] *= strongPenalty;
-                            else
-                                logits[tokenId] /= strongPenalty;
-                        }
-                    }
-                    
-                    // ループ検出: 直近トークン列に同一パターン（長さ3〜8）の繰り返しがあれば強制終了
-                    if (generateTokens.Count >= 16)
-                    {
-                        bool loopDetected = false;
-                        int checkCount = Math.Min(generateTokens.Count, 48);
-                        var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
-                        for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
-                        {
-                            if (recent.Length < patLen * 3) continue;
-                            // 末尾から patLen 個のパターンが直前にも同じ順序で3回以上出現するか確認
-                            var tail = recent.Skip(recent.Length - patLen).ToArray();
-                            int matchCount = 1; // 自分自身を1カウントとしてスタート
-                            for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
+                            if (tokenId >= 0 && tokenId < vocabSize)
                             {
-                                bool match = true;
-                                for (int k = 0; k < patLen; k++)
+                                if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
+                                else logits[tokenId] /= repetitionPenalty;
+                            }
+                        }
+
+                        const int recentWindow = 64;
+                        float strongPenalty = repetitionPenalty * 1.3f;
+                        int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
+                        var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
+                        foreach (long tokenId in recentTokens)
+                        {
+                            if (tokenId >= 0 && tokenId < vocabSize)
+                            {
+                                if (logits[tokenId] < 0) logits[tokenId] *= strongPenalty;
+                                else logits[tokenId] /= strongPenalty;
+                            }
+                        }
+
+                        if (generateTokens.Count >= 16)
+                        {
+                            bool loopDetected = false;
+                            int checkCount = Math.Min(generateTokens.Count, 48);
+                            var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
+                            for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
+                            {
+                                if (recent.Length < patLen * 3) continue;
+                                var tail = recent.Skip(recent.Length - patLen).ToArray();
+                                int matchCount = 1;
+                                for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
                                 {
-                                    if (recent[pos + k] != tail[k]) { match = false; break; }
+                                    bool match = true;
+                                    for (int k = 0; k < patLen; k++)
+                                    {
+                                        if (recent[pos + k] != tail[k]) { match = false; break; }
+                                    }
+                                    if (match) matchCount++;
                                 }
-                                if (match) matchCount++;
+                                if (matchCount >= 3)
+                                {
+                                    Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
+                                    loopDetected = true;
+                                }
                             }
-                            if (matchCount >= 3)
-                            {
-                                Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
-                                loopDetected = true;
-                            }
+                            if (loopDetected) break;
                         }
-                        if (loopDetected) break;
+
+                        long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                        generateTokens.Add(nextToken);
+
+                        if (nextToken == stopSpeechToken)
+                        {
+                            Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
+                            break;
+                        }
+
+                        if (step < 20 || step % 50 == 0)
+                        {
+                            Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
+                        }
+
+                        var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
+                        var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
+                        var nextEmbedInputs = new List<NamedOnnxValue>
+                        {
+                            NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
+                        };
+                        if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                        {
+                            nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor));
+                        }
+                        if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                        {
+                            nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
+                        }
+                        using var nextEmbedResults = _embedTokens.Run(nextEmbedInputs);
+                        currentEmbeds = CloneTensor(nextEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
+
+                        var newMaskValues = currentMask.ToArray().Concat(new[] { 1L }).ToArray();
+                        currentMask = new DenseTensor<long>(newMaskValues, new[] { 1, newMaskValues.Length });
+
+                            totalSeqLen++;
+                        }
                     }
-
-                    // 確率的サンプリング (temperature, topP = 0.95f, minP = 0.05f)
-                    long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
-
-                    // generate_tokens に追加
-                    generateTokens.Add(nextToken);
-
-                    // 終了トークンの検出
-                    if (nextToken == stopSpeechToken)
-                    {
-                        Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
-                        break;
-                    }
-
-                    if (step < 20 || step % 50 == 0)
-                    {
-                        Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
-                    }
-
-                    // 次のステップの入力埋め込みを生成
-                    // リファレンス: position_ids = np.full((input_ids.shape[0], 1), i + 1, dtype=np.int64)
-                    var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
-                    var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
-                    
-                    var nextEmbedInputs = new List<NamedOnnxValue>
-                    {
-                        NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
-                    };
-                    if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
-                    {
-                        nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor));
-                    }
-                    if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
-                    {
-                        nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
-                    }
-                    using var nextEmbedResults = _embedTokens.Run(nextEmbedInputs);
-                    currentEmbeds = CloneTensor(nextEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
-
-                    // アテンションマスクを拡張
-                    var newMaskValues = currentMask.ToArray().Concat(new[] { 1L }).ToArray();
-                    currentMask = new DenseTensor<long>(newMaskValues, new[] { 1, newMaskValues.Length });
-
-                    // 言語モデルにposition_idsの入力が必要な場合、現在のシーケンス長をインクリメント
-                    totalSeqLen++;
-                }
 
                 // speech_tokens の組み立て（リファレンス: generate_tokens[:, 1:-1] → START_SPEECH_TOKENと最後のSTOP_TOKENを除去）
                 // generateTokens = [6561, token1, token2, ..., (6562 if stopped)]

@@ -38,10 +38,22 @@
     <AssemblyName>CBoxTTS.Native</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <OnnxBackend Condition="'$(OnnxBackend)' == ''">DirectML</OnnxBackend>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(OnnxBackend)' == 'GPU'">
+    <DefineConstants>$(DefineConstants);USE_CUDA</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OnnxBackend)' == 'DirectML' Or '$(OnnxBackend)' == ''">
+    <DefineConstants>$(DefineConstants);USE_DML</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- 英語版ビルド以外（Debug, Release, Release_JA）のみ MeCab.DotNet を参照 -->
     <PackageReference Include="MeCab.DotNet" Version="0.0.40" Condition="'$(Configuration)' != 'Release_EN'" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" Condition="'$(OnnxBackend)' == 'DirectML'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.20.1" Condition="'$(OnnxBackend)' == 'GPU'" />
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 

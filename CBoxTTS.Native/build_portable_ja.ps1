@@ -1,10 +1,15 @@
+param(
+    [string]$OnnxBackend = "DirectML"
+)
+
 # C-Box TTS Native Japanese Portable Build Script
 $projectName = "CBoxTTS.Native"
-$outputDirName = "Release_Portable_JA"
+$suffix = if ($OnnxBackend -eq "GPU") { "_CUDA" } else { "" }
+$outputDirName = "Release_Portable_JA" + $suffix
 $publishDir = "bin\Release_JA\net10.0-windows\win-x64\publish"
 
-Write-Host "--- 1. Publishing Native Binary (Japanese Build) ---"
-dotnet publish -c Release_JA -r win-x64 --self-contained true /p:PublishReadyToRun=true
+Write-Host "--- 1. Publishing Native Binary (Japanese Build) with Backend: $OnnxBackend ---"
+dotnet publish -c Release_JA -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:OnnxBackend=$OnnxBackend
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: Publish failed."

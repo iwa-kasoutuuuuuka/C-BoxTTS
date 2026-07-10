@@ -31,7 +31,7 @@ namespace CBoxTTS.Native
                 {
                     if (StatusText.Text == GetMsg("再生中...", "Playing..."))
                     {
-                        StatusText.Text = GetMsg("準備完了", "Ready");
+                        StatusText.Text = GetReadyMsg();
                     }
                 });
             };
@@ -135,7 +135,7 @@ namespace CBoxTTS.Native
                 _isInitialized = true;
                 PlayButton.IsEnabled = true;
                 SaveButton.IsEnabled = true;
-                StatusText.Text = GetMsg("準備完了", "Ready");
+                StatusText.Text = GetReadyMsg();
                 StatusText.Foreground = System.Windows.Media.Brushes.LightGreen;
                 StatusProgress.Visibility = Visibility.Collapsed;
                 UpdateModelComboItemsAvailability(LanguageCombo.SelectedIndex);
@@ -245,7 +245,7 @@ namespace CBoxTTS.Native
                     _morph?.Initialize();
                 });
 
-                StatusText.Text = GetMsg("準備完了", "Ready");
+                StatusText.Text = GetReadyMsg();
                 StatusText.Foreground = System.Windows.Media.Brushes.LightGreen;
             }
             catch (Exception ex)
@@ -807,9 +807,18 @@ namespace CBoxTTS.Native
             }
         }
 
+        private string GetReadyMsg()
+        {
+            return GetMsg($"準備完了 ({_engine?.ActiveBackend ?? "CPU"})", $"Ready ({_engine?.ActiveBackend ?? "CPU"})");
+        }
+
         private string GetMsg(string ja, string en)
         {
+#if EN_BUILD
+            return en;
+#else
             return ja;
+#endif
         }
 
         protected override void OnClosed(EventArgs e)

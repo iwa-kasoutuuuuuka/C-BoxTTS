@@ -20,6 +20,36 @@ namespace CBoxTTS.Native
         // embed_tokens.onnx の実際のEmbedding行列行数（モデルロード後に SetEmbeddingVocabSize で設定）。
         // この値が設定されている場合、_maxVocabTokenId より優先的にクランプ上限として使用される。
         private long _embeddingVocabSize = -1;
+        private bool _isByteLevel = false;
+
+        private static readonly Dictionary<byte, char> BytesToUnicode = GetBytesToUnicode();
+
+        private static Dictionary<byte, char> GetBytesToUnicode()
+        {
+            var d = new Dictionary<byte, char>();
+            var bs = new List<int>();
+            for (int i = 33; i <= 126; i++) bs.Add(i);
+            for (int i = 161; i <= 172; i++) bs.Add(i);
+            for (int i = 174; i <= 255; i++) bs.Add(i);
+
+            var cs = new List<int>(bs);
+            int n = 0;
+            for (int b = 0; b < 256; b++)
+            {
+                if (!bs.Contains(b))
+                {
+                    bs.Add(b);
+                    cs.Add(256 + n);
+                    n++;
+                }
+            }
+
+            for (int i = 0; i < bs.Count; i++)
+            {
+                d[(byte)bs[i]] = (char)cs[i];
+            }
+            return d;
+        }
 
         public Tokenizer(string jsonPath)
         {
@@ -61,6 +91,7 @@ namespace CBoxTTS.Native
                 {
                     _maxVocabTokenId = _vocab.Values.Max();
                 }
+                _isByteLevel = _vocab.Count > 5000;
                 Log($"語彙のロードに成功しました。総語彙数: {_vocab.Count}, 語彙最大ID: {_maxVocabTokenId}");
 
                 _merges.Clear();
@@ -166,16 +197,156 @@ namespace CBoxTTS.Native
             var ids = new List<long> { StartToken, languageToken };
             Log($"初期化トークン追加: StartToken({StartToken}), LanguageToken({languageToken})");
 
-            // 空白で事前分割
-            var words = normalized.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.None);
-
-            for (int wIdx = 0; wIdx < words.Length; wIdx++)
+            if (_isByteLevel)
             {
-                string word = words[wIdx];
-                
-                // 空白文字だった場合は、対応するスペーストークンを追加
-                if (string.IsNullOrEmpty(word))
+                // GPT-2 BPE pre-tokenization using regex
+                var matches = System.Text.RegularExpressions.Regex.Matches(normalized, @"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+");
+                long maxValidId = GetMaxValidTokenId();
+
+                foreach (System.Text.RegularExpressions.Match match in matches)
                 {
+                    string matchVal = match.Value;
+                    if (string.IsNullOrEmpty(matchVal)) continue;
+
+                    // Convert to UTF-8 bytes
+                    byte[] utf8Bytes = System.Text.Encoding.UTF8.GetBytes(matchVal);
+
+                    // Map bytes to unicode characters
+                    var symbols = new List<string>();
+                    foreach (byte b in utf8Bytes)
+                    {
+                        if (BytesToUnicode.TryGetValue(b, out char c))
+                        {
+                            symbols.Add(c.ToString());
+                        }
+                    }
+
+                    // Apply merges
+                    foreach (var pair in _merges)
+                    {
+                        int i = 0;
+                        while (i < symbols.Count - 1)
+                        {
+                            if (symbols[i] == pair.First && symbols[i + 1] == pair.Second)
+                            {
+                                symbols[i] = symbols[i] + symbols[i + 1];
+                                symbols.RemoveAt(i + 1);
+                            }
+                            else
+                            {
+                                i++;
+                            }
+                        }
+                    }
+
+                    // Map to vocab IDs
+                    foreach (var sym in symbols)
+                    {
+                        if (_vocab.TryGetValue(sym, out long id))
+                        {
+                            if (id > maxValidId)
+                            {
+                                Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {maxValidId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
+                                id = 1;
+                            }
+                            else
+                            {
+                                Log($"トークン: '{sym}' -> ID: {id}");
+                            }
+                            ids.Add(id);
+                        }
+                        else
+                        {
+                            Log($"トークン: '{sym}' -> [UNK] 未知語のため ID 1 を割り当て");
+                            ids.Add(1);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // 空白で事前分割
+                var words = normalized.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.None);
+
+                for (int wIdx = 0; wIdx < words.Length; wIdx++)
+                {
+                    string word = words[wIdx];
+                    
+                    // 空白文字だった場合は、対応するスペーストークンを追加
+                    if (string.IsNullOrEmpty(word))
+                    {
+                        if (wIdx < words.Length - 1)
+                        {
+                            if (_vocab.TryGetValue("[SPACE]", out long spaceId))
+                            {
+                                ids.Add(spaceId);
+                            }
+                            else if (_vocab.TryGetValue(" ", out long spaceId2))
+                            {
+                                ids.Add(spaceId2);
+                            }
+                        }
+                        continue;
+                    }
+
+                    // 単語を文字のリストに分解
+                    var symbols = new List<string>();
+                    for (int i = 0; i < word.Length; i++)
+                    {
+                        if (char.IsHighSurrogate(word[i]) && i + 1 < word.Length)
+                        {
+                            symbols.Add(word.Substring(i, 2));
+                            i++;
+                        }
+                        else
+                        {
+                            symbols.Add(word[i].ToString());
+                        }
+                    }
+
+                    // BPE マージルールの適用
+                    foreach (var pair in _merges)
+                    {
+                        int i = 0;
+                        while (i < symbols.Count - 1)
+                        {
+                            if (symbols[i] == pair.First && symbols[i + 1] == pair.Second)
+                            {
+                                symbols[i] = symbols[i] + symbols[i + 1];
+                                symbols.RemoveAt(i + 1);
+                            }
+                            else
+                            {
+                                i++;
+                            }
+                        }
+                    }
+
+                    // 語彙 ID に変換
+                    long maxValidId = GetMaxValidTokenId();
+                    foreach (var sym in symbols)
+                    {
+                        if (_vocab.TryGetValue(sym, out long id))
+                        {
+                            if (id > maxValidId)
+                            {
+                                Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {maxValidId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
+                                id = 1;
+                            }
+                            else
+                            {
+                                Log($"トークン: '{sym}' -> ID: {id}");
+                            }
+                            ids.Add(id);
+                        }
+                        else
+                        {
+                            Log($"トークン: '{sym}' -> [UNK] 未知語のため ID 1 を割り当て");
+                            ids.Add(1);
+                        }
+                    }
+
+                    // 単語間のスペースを追加（最後の単語以外）
                     if (wIdx < words.Length - 1)
                     {
                         if (_vocab.TryGetValue("[SPACE]", out long spaceId))
@@ -186,77 +357,6 @@ namespace CBoxTTS.Native
                         {
                             ids.Add(spaceId2);
                         }
-                    }
-                    continue;
-                }
-
-                // 単語を文字のリストに分解
-                var symbols = new List<string>();
-                for (int i = 0; i < word.Length; i++)
-                {
-                    if (char.IsHighSurrogate(word[i]) && i + 1 < word.Length)
-                    {
-                        symbols.Add(word.Substring(i, 2));
-                        i++;
-                    }
-                    else
-                    {
-                        symbols.Add(word[i].ToString());
-                    }
-                }
-
-                // BPE マージルールの適用
-                foreach (var pair in _merges)
-                {
-                    int i = 0;
-                    while (i < symbols.Count - 1)
-                    {
-                        if (symbols[i] == pair.First && symbols[i + 1] == pair.Second)
-                        {
-                            symbols[i] = symbols[i] + symbols[i + 1];
-                            symbols.RemoveAt(i + 1);
-                        }
-                        else
-                        {
-                            i++;
-                        }
-                    }
-                }
-
-                // 語彙 ID に変換
-                long maxValidId = GetMaxValidTokenId();
-                foreach (var sym in symbols)
-                {
-                    if (_vocab.TryGetValue(sym, out long id))
-                    {
-                        if (id > maxValidId)
-                        {
-                            Log($"[警告/安全装置作動] トークン '{sym}' の辞書ID {id} がモデル上限 {maxValidId} を超過しています！ID を 1 (UNK) に安全マッピングします。");
-                            id = 1;
-                        }
-                        else
-                        {
-                            Log($"トークン: '{sym}' -> ID: {id}");
-                        }
-                        ids.Add(id);
-                    }
-                    else
-                    {
-                        Log($"トークン: '{sym}' -> [UNK] 未知語のため ID 1 を割り当て");
-                        ids.Add(1);
-                    }
-                }
-
-                // 単語間のスペースを追加（最後の単語以外）
-                if (wIdx < words.Length - 1)
-                {
-                    if (_vocab.TryGetValue("[SPACE]", out long spaceId))
-                    {
-                        ids.Add(spaceId);
-                    }
-                    else if (_vocab.TryGetValue(" ", out long spaceId2))
-                    {
-                        ids.Add(spaceId2);
                     }
                 }
             }
