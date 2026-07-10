@@ -580,6 +580,10 @@ namespace CBoxTTS.Native
                     var cudaPastKeyValues = new Dictionary<string, OrtValue>();
                     var cudaUncondPastKeyValues = new Dictionary<string, OrtValue>();
 
+                    OrtValue? currentEmbedsOrtVal = null;
+                    OrtValue? uncondEmbedsOrtVal = null;
+                    OrtValue? exaggerationOrt = null;
+
                     try
                     {
                         var cpuMemInfo = OrtMemoryInfo.DefaultInstance;
@@ -613,6 +617,17 @@ namespace CBoxTTS.Native
                         float[] step0LogitsBuffer = null;
                         float[] uncondStep0LogitsBuffer = null;
 
+                        // ステップ 0 の初期埋め込みを OrtValue にラップ
+                        currentEmbedsOrtVal = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, currentEmbeds.Buffer, currentEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                        if (useCfg)
+                        {
+                            uncondEmbedsOrtVal = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, uncondEmbeds!.Buffer, uncondEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                        }
+                        if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
+                        {
+                            exaggerationOrt = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, exaggerationTensor.Buffer, exaggerationTensor.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                        }
+
                         for (int step = 0; step < maxNewTokens; step++)
                         {
                             DenseTensor<long>? posTensor = null;
@@ -634,9 +649,8 @@ namespace CBoxTTS.Native
                             // ----------------- 1. 条件付きパスの推論 -----------------
                             using (var ioBinding = _languageModel.CreateIoBinding())
                             {
-                                using var currentEmbedsOrt = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, currentEmbeds.Buffer, currentEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
                                 using var currentMaskOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, currentMask.Buffer, currentMask.Dimensions.ToArray().Select(d => (long)d).ToArray());
-                                ioBinding.BindInput("inputs_embeds", currentEmbedsOrt);
+                                ioBinding.BindInput("inputs_embeds", currentEmbedsOrtVal);
                                 ioBinding.BindInput("attention_mask", currentMaskOrt);
 
                                 OrtValue? posTensorOrt = null;
@@ -719,12 +733,11 @@ namespace CBoxTTS.Native
                             float[] logits;
                             if (useCfg)
                             {
-                                DenseTensor<float> uncondCurrentEmbeds = (step == 0) ? uncondEmbeds! : currentEmbeds;
+                                var targetEmbedsOrtVal = (step == 0) ? uncondEmbedsOrtVal! : currentEmbedsOrtVal;
                                 using (var uncondIoBinding = _languageModel.CreateIoBinding())
                                 {
-                                    using var uncondCurrentEmbedsOrt = OrtValue.CreateTensorValueFromMemory<float>(cpuMemInfo, uncondCurrentEmbeds.Buffer, uncondCurrentEmbeds.Dimensions.ToArray().Select(d => (long)d).ToArray());
                                     using var currentMaskOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, currentMask.Buffer, currentMask.Dimensions.ToArray().Select(d => (long)d).ToArray());
-                                    uncondIoBinding.BindInput("inputs_embeds", uncondCurrentEmbedsOrt);
+                                    uncondIoBinding.BindInput("inputs_embeds", targetEmbedsOrtVal);
                                     uncondIoBinding.BindInput("attention_mask", currentMaskOrt);
 
                                     OrtValue? posTensorOrt = null;
@@ -802,7 +815,7 @@ namespace CBoxTTS.Native
                                 logits = new float[vocabSize];
                                 for (int v = 0; v < vocabSize; v++)
                                 {
-                                    logits[v] = condLogits[v] + cfgWeight * (condLogits[v] - uncondLogits[v]);
+                                    logits[v] = condLogits[v] + (condLogits[v] - uncondLogits[v]) * cfgWeight;
                                 }
                             }
                             else
@@ -876,23 +889,43 @@ namespace CBoxTTS.Native
                                 Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
                             }
 
-                            // 次の入力埋め込みを生成
+                            // 次の入力埋め込みを生成 (GPU-direct binding)
                             var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
                             var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
-                            var nextEmbedInputs = new List<NamedOnnxValue>
+
+                            using (var embedIoBinding = _embedTokens.CreateIoBinding())
                             {
-                                NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
-                            };
-                            if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
-                            {
-                                nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", nextPositionTensor));
+                                using var nextTokenOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, nextTokenTensor.Buffer, nextTokenTensor.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                embedIoBinding.BindInput("input_ids", nextTokenOrt);
+
+                                OrtValue? nextPosOrt = null;
+                                try
+                                {
+                                    if (_embedTokens.InputMetadata.ContainsKey("position_ids"))
+                                    {
+                                        nextPosOrt = OrtValue.CreateTensorValueFromMemory<long>(cpuMemInfo, nextPositionTensor.Buffer, nextPositionTensor.Dimensions.ToArray().Select(d => (long)d).ToArray());
+                                        embedIoBinding.BindInput("position_ids", nextPosOrt);
+                                    }
+                                    if (exaggerationOrt != null)
+                                    {
+                                        embedIoBinding.BindInput("exaggeration", exaggerationOrt);
+                                    }
+
+                                    embedIoBinding.BindOutputToDevice("inputs_embeds", cudaMemInfo);
+
+                                    _embedTokens.RunWithBinding(new RunOptions(), embedIoBinding);
+
+                                    var embedOutputs = embedIoBinding.GetOutputValues();
+                                    var nextEmbedsOrtVal = embedOutputs.First();
+
+                                    currentEmbedsOrtVal.Dispose();
+                                    currentEmbedsOrtVal = nextEmbedsOrtVal;
+                                }
+                                finally
+                                {
+                                    nextPosOrt?.Dispose();
+                                }
                             }
-                            if (_embedTokens.InputMetadata.ContainsKey("exaggeration"))
-                            {
-                                nextEmbedInputs.Add(NamedOnnxValue.CreateFromTensor("exaggeration", exaggerationTensor));
-                            }
-                            using var nextEmbedResults = _embedTokens.Run(nextEmbedInputs);
-                            currentEmbeds = CloneTensor(nextEmbedResults.First(o => o.Name == "inputs_embeds").AsTensor<float>());
 
                             var newMaskValues = currentMask.ToArray().Concat(new[] { 1L }).ToArray();
                             currentMask = new DenseTensor<long>(newMaskValues, new[] { 1, newMaskValues.Length });
@@ -904,6 +937,9 @@ namespace CBoxTTS.Native
                     {
                         foreach (var val in cudaPastKeyValues.Values) val.Dispose();
                         foreach (var val in cudaUncondPastKeyValues.Values) val.Dispose();
+                        currentEmbedsOrtVal?.Dispose();
+                        uncondEmbedsOrtVal?.Dispose();
+                        exaggerationOrt?.Dispose();
                     }
                 }
                 else
