@@ -8,8 +8,12 @@ $suffix = if ($OnnxBackend -eq "GPU") { "_CUDA" } else { "" }
 $outputDirName = "Release_Portable_JA" + $suffix
 $publishDir = "bin\Release_JA\net10.0-windows\win-x64\publish"
 
+Write-Host "Cleaning build folders to prevent DLL caching issues..."
+Remove-Item -Path "obj", "bin" -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Host "--- 1. Publishing Native Binary (Japanese Build) with Backend: $OnnxBackend ---"
-dotnet publish -c Release_JA -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:OnnxBackend=$OnnxBackend
+# dotnet publish will automatically run restore on the cleaned project using the correct OnnxBackend property
+& "C:\Program Files\dotnet\dotnet.exe" publish -c Release_JA -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:OnnxBackend=$OnnxBackend
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: Publish failed."
@@ -30,6 +34,41 @@ if (Test-Path $fullOutputPath) {
 # Copy all files from publish (EXE, DLLs, etc.)
 Write-Host "Copying binaries and DLLs..."
 Copy-Item -Path "$publishDir\*" -Destination $fullOutputPath -Force
+
+if ($OnnxBackend -eq "GPU") {
+    Write-Host "Copying CUDA/cuDNN/NVRTC DLLs to portable folder..."
+    
+    # 1. cuDNN DLLs from debug folder
+    $debugCudnnDir = "bin\Debug\net10.0-windows\win-x64"
+    if (Test-Path "$debugCudnnDir\cudnn64_9.dll") {
+        Copy-Item -Path "$debugCudnnDir\cud*.dll" -Destination $fullOutputPath -Force
+    }
+    
+    # 2. Search for CUDA toolkit bin path
+    $cudaPath = $null
+    if ($env:CUDA_PATH) {
+        $cudaPath = Join-Path $env:CUDA_PATH "bin"
+    }
+    if (-not $cudaPath -or -not (Test-Path $cudaPath)) {
+        $cudaPath = Get-ChildItem -Path "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" -ErrorAction SilentlyContinue | 
+            Sort-Object Name -Descending | 
+            Select-Object -First 1 | 
+            ForEach-Object { Join-Path $_.FullName "bin" }
+    }
+    
+    if ($cudaPath -and (Test-Path $cudaPath)) {
+        Write-Host "Found CUDA Toolkit at: $cudaPath"
+        # Copy cublas, nvrtc and dependent dlls
+        $cudaDlls = @("cublas64_12.dll", "cublasLt64_12.dll", "cusparse64_12.dll", "cusolver64_11.dll", "cufft64_11.dll", "curand64_10.dll", "nv*.dll")
+        foreach ($dll in $cudaDlls) {
+            if (Test-Path "$cudaPath\$dll") {
+                Copy-Item -Path "$cudaPath\$dll" -Destination $fullOutputPath -Force
+            }
+        }
+    } else {
+        Write-Warning "CUDA Toolkit bin directory not found. Please ensure CUDA DLLs are copied manually."
+    }
+}
 
 # Remove DirectML debug layers to prevent hangs
 Remove-Item -Path (Join-Path $fullOutputPath "DirectML.Debug.dll") -ErrorAction SilentlyContinue
