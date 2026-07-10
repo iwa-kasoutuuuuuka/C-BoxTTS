@@ -254,7 +254,7 @@ namespace CBoxTTS.Native
                                     {
                                         { "device_id", "0" },
                                         { "cudnn_conv_use_max_workspace", "1" },
-                                        { "cudnn_conv_algo_search", "EXHAUSTIVE" }
+                                        { "cudnn_conv_algo_search", "HEURISTIC" }
                                     };
                                     cudaProviderOptions.UpdateOptions(providerOptionsDict);
                                     options.AppendExecutionProvider_CUDA(cudaProviderOptions);
