@@ -44,6 +44,13 @@ if ($OnnxBackend -eq "GPU") {
         Copy-Item -Path "$debugCudnnDir\cud*.dll" -Destination $fullOutputPath -Force
     }
     
+    # 2. Copy zlibwapi.dll from lib folder
+    $libZlibPath = "lib\zlibwapi.dll"
+    if (Test-Path $libZlibPath) {
+        Write-Host "Copying zlibwapi.dll from lib folder..."
+        Copy-Item -Path $libZlibPath -Destination $fullOutputPath -Force
+    }
+    
     # 2. Search for CUDA toolkit bin path
     $cudaPath = $null
     if ($env:CUDA_PATH) {
