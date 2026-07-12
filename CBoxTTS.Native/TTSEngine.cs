@@ -1283,7 +1283,7 @@ namespace CBoxTTS.Native
                 
                 if (wav != null && wav.Length > 0)
                 {
-                    wav = TrimSilence(wav, 0.02f); // 各チャンクの冒頭・末尾の無音を除去
+                    wav = TrimSilence(wav, 0.005f); // 各チャンクの冒頭・末尾の無音を除去（子音の頭切れを防ぐため低いしきい値を使用）
                     allWavChunks.Add(wav);
                 }
                 else
@@ -1442,8 +1442,8 @@ namespace CBoxTTS.Native
                 }
             }
 
-            // トリム前後に少し余裕を持たせる（480サンプル = 0.02秒）
-            int margin = 480;
+            // トリム前後に少し余裕を持たせる（1200サンプル = 0.05秒。子音の頭切れを防ぐための十分なマージン）
+            int margin = 1200;
             startIdx = Math.Max(0, startIdx - margin);
             endIdx = Math.Min(audio.Length - 1, endIdx + margin);
 
