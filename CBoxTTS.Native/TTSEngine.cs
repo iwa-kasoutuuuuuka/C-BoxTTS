@@ -248,6 +248,11 @@ namespace CBoxTTS.Native
 #if USE_CUDA
                             try
                             {
+                                // Force speech_encoder to run on CPU to avoid cuDNN 9.x convolutional stack overrun bug 0xc0000409 on RTX 5080.
+                                if (baseName.StartsWith("speech_encoder"))
+                                {
+                                    throw new Exception("Force speech_encoder to run on CPU to prevent cuDNN 9.x stack overrun (0xc0000409).");
+                                }
                                 using (var cudaProviderOptions = new OrtCUDAProviderOptions())
                                 {
                                     var providerOptionsDict = new Dictionary<string, string>
