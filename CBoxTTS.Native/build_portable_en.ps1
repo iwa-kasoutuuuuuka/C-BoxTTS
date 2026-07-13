@@ -38,10 +38,11 @@ Copy-Item -Path "$publishDir\*" -Destination $fullOutputPath -Force
 if ($OnnxBackend -eq "GPU") {
     Write-Host "Copying CUDA/cuDNN/NVRTC DLLs to portable folder..."
     
-    # 1. cuDNN DLLs from debug folder
-    $debugCudnnDir = "bin\Debug\net10.0-windows\win-x64"
-    if (Test-Path "$debugCudnnDir\cudnn64_9.dll") {
-        Copy-Item -Path "$debugCudnnDir\cud*.dll" -Destination $fullOutputPath -Force
+    # 1. cuDNN DLLs from lib folder
+    $libCudnnPath = "lib"
+    if (Test-Path "$libCudnnPath\cudnn64_9.dll") {
+        Write-Host "Copying cuDNN DLLs from lib folder..."
+        Copy-Item -Path "$libCudnnPath\cud*.dll" -Destination $fullOutputPath -Force
     }
     
     # 2. Copy zlibwapi.dll from lib folder
