@@ -580,7 +580,7 @@ namespace CBoxTTS.Native
                 int maxNewTokens = 760; // 安全のための最大トークン制限（英語長文でも途中打ち切りを防ぐ）
                 Log("自己回帰ループ開始...");
 
-                if (ActiveBackend == "CUDA")
+                if (false && ActiveBackend == "CUDA")
                 {
                     var cudaPastKeyValues = new Dictionary<string, OrtValue>();
                     var cudaUncondPastKeyValues = new Dictionary<string, OrtValue>();
