@@ -1201,6 +1201,14 @@ namespace CBoxTTS.Native
                 float maxValOut = wavData.Length > 0 ? wavData.Max() : 0f;
                 Log($"波形合成成功: {wavData.Length} サンプル. MaxAbsAmp: {maxAbs}, Min: {minVal}, Max: {maxValOut}");
 
+                // デコーダー出力の先頭2400サンプル(0.1秒)の最大振幅をログに記録（先頭無音の診断用）
+                int diagLen = Math.Min(2400, wavData.Length);
+                float diagMaxAbs = diagLen > 0 ? Enumerable.Range(0, diagLen).Max(j => Math.Abs(wavData[j])) : 0f;
+                Log($"デコーダー出力: 先頭0.1秒の最大振幅 = {diagMaxAbs:F4}（0に近い場合は先頭が無音）");
+
+                // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す
+                wavData = TrimSilence(wavData, 0.005f);
+
                 return wavData;
             });
         }
@@ -1259,6 +1267,7 @@ namespace CBoxTTS.Native
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
                 var singleWav = await GenerateAsync(ids, voicePath, exaggeration, temperature, cfgWeight, repetitionPenalty);
+                // GenerateAsync内でTrimSilenceが適用済みのため、ここではPadAudioのみ
                 return PadAudio(singleWav);
             }
 
