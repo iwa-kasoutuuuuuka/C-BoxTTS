@@ -202,9 +202,9 @@ namespace CBoxTTS.Native
                 // モデルの種類に応じて RepetitionPenaltySlider のデフォルト値を自動セット
                 float defaultRepetitionPenalty = selectedType switch
                 {
-                    ModelType.Turbo => 1.2f,
-                    ModelType.English => 1.2f,
-                    _ => 1.15f
+                    ModelType.Turbo => 1.35f,
+                    ModelType.English => 1.35f,
+                    _ => 1.2f
                 };
                 if (RepetitionPenaltySlider != null)
                 {
@@ -510,7 +510,7 @@ namespace CBoxTTS.Native
             if (double.TryParse(RepetitionPenaltyText.Text, out double val))
             {
                 if (val < 1.0) val = 1.0;
-                if (val > 1.5) val = 1.5;
+                if (val > 2.0) val = 2.0;
                 RepetitionPenaltySlider.Value = val;
             }
             RepetitionPenaltyText.Text = RepetitionPenaltySlider.Value.ToString("F2");
