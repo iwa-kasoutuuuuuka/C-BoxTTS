@@ -103,7 +103,7 @@ namespace CBoxTTS.Native
             }
 
             int inputPtr = 0;
-            int outputPtr = 0;
+            double targetOutputPtr = 0.0; // bestDelayの累積を防ぐため、基準となる目標出力ポインタを別途管理
 
             // 最初のフレームを配置
             if (inputLen >= frameSize)
@@ -114,7 +114,7 @@ namespace CBoxTTS.Native
                     outputWeights.Add(1.0f);
                 }
                 inputPtr += hopAnalysis;
-                outputPtr += hopSynthesis;
+                targetOutputPtr += hopSynthesis;
             }
             else
             {
@@ -126,13 +126,19 @@ namespace CBoxTTS.Native
                 int bestDelay = 0;
                 double maxCorrelation = double.NegativeInfinity;
 
+                // 基準位置を整数に丸める
+                int currentTargetPtr = (int)Math.Round(targetOutputPtr);
+
                 // 重ね合わせ領域での最適な位置を探索 (SOLA)
                 int overlapRegion = frameSize - hopSynthesis;
-                if (overlapRegion > 0 && output.Count >= outputPtr + overlapRegion)
+                if (overlapRegion < 128) overlapRegion = 128;
+                if (overlapRegion > frameSize) overlapRegion = frameSize;
+
+                if (output.Count >= currentTargetPtr + overlapRegion)
                 {
                     for (int delay = -maxDelay / 2; delay < maxDelay / 2; delay++)
                     {
-                        int targetOutPtr = outputPtr + delay;
+                        int targetOutPtr = currentTargetPtr + delay;
                         if (targetOutPtr < 0 || targetOutPtr + overlapRegion > output.Count)
                             continue;
 
@@ -168,7 +174,7 @@ namespace CBoxTTS.Native
                     }
                 }
 
-                int actualOutPtr = outputPtr + bestDelay;
+                int actualOutPtr = currentTargetPtr + bestDelay;
 
                 while (output.Count < actualOutPtr + frameSize)
                 {
@@ -188,7 +194,7 @@ namespace CBoxTTS.Native
                 }
 
                 inputPtr += hopAnalysis;
-                outputPtr = actualOutPtr + hopSynthesis;
+                targetOutputPtr += hopSynthesis; // 次のステップの目標位置は、今回のローカルなbestDelayの影響を受けずに一定間隔で進める
             }
 
             float[] result = new float[output.Count];
