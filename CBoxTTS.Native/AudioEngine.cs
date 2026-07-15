@@ -86,14 +86,10 @@ namespace CBoxTTS.Native
 
             int frameSize = 1024;
             int hopAnalysis = 256;
-            int hopSynthesis = (int)(hopAnalysis / speed);
-            if (hopSynthesis <= 0) hopSynthesis = 1;
-
-            int maxDelay = 256; // 探索窓サイズ
+            int hopSynthesis = Math.Max(1, (int)Math.Round((double)hopAnalysis / speed));
+            int maxSearchOffset = 128; // ピッチ同期探索範囲 ±128サンプル
             int inputLen = input.Length;
-
-            var output = new List<float>();
-            var outputWeights = new List<float>();
+            if (inputLen < frameSize) return input;
 
             // ハニング窓の作成
             float[] window = new float[frameSize];
@@ -102,112 +98,85 @@ namespace CBoxTTS.Native
                 window[i] = 0.5f * (1.0f - (float)Math.Cos(2.0 * Math.PI * i / (frameSize - 1)));
             }
 
-            int inputPtr = 0;
-            double targetOutputPtr = 0.0; // bestDelayの累積を防ぐため、基準となる目標出力ポインタを別途管理
+            // フレーム数と出力長を事前計算してバッファを確保（List動的拡張よりも高速）
+            int numFrames = (inputLen - frameSize) / hopAnalysis + 1;
+            int outputLen = (numFrames - 1) * hopSynthesis + frameSize + maxSearchOffset * 2;
+            float[] output = new float[outputLen];
+            float[] outputWeights = new float[outputLen];
 
-            // 最初のフレームを配置
-            if (inputLen >= frameSize)
+            for (int frame = 0; frame < numFrames; frame++)
             {
-                for (int i = 0; i < frameSize; i++)
+                int inputStart = frame * hopAnalysis;
+                if (inputStart + frameSize > inputLen) break;
+
+                // 出力配置の基準位置: フレーム番号 × 合成ホップサイズ（ドリフトしない）
+                int nominalOutputStart = frame * hopSynthesis;
+                int bestOffset = 0;
+
+                // 2フレーム目以降: SOLA位相同期探索
+                if (frame > 0)
                 {
-                    output.Add(input[i]);
-                    outputWeights.Add(1.0f);
-                }
-                inputPtr += hopAnalysis;
-                targetOutputPtr += hopSynthesis;
-            }
-            else
-            {
-                return input;
-            }
+                    int overlapLen = Math.Max(128, frameSize - hopSynthesis);
+                    if (overlapLen > frameSize) overlapLen = frameSize;
 
-            while (inputPtr + frameSize <= inputLen)
-            {
-                int bestDelay = 0;
-                double maxCorrelation = double.NegativeInfinity;
+                    double bestCorr = double.NegativeInfinity;
 
-                // 基準位置を整数に丸める
-                int currentTargetPtr = (int)Math.Round(targetOutputPtr);
-
-                // 重ね合わせ領域での最適な位置を探索 (SOLA)
-                int overlapRegion = frameSize - hopSynthesis;
-                if (overlapRegion < 128) overlapRegion = 128;
-                if (overlapRegion > frameSize) overlapRegion = frameSize;
-
-                if (output.Count >= currentTargetPtr + overlapRegion)
-                {
-                    for (int delay = -maxDelay / 2; delay < maxDelay / 2; delay++)
+                    for (int offset = -maxSearchOffset; offset <= maxSearchOffset; offset++)
                     {
-                        int targetOutPtr = currentTargetPtr + delay;
-                        if (targetOutPtr < 0 || targetOutPtr + overlapRegion > output.Count)
-                            continue;
+                        int candidateStart = nominalOutputStart + offset;
+                        if (candidateStart < 0 || candidateStart + overlapLen > outputLen) continue;
 
-                        double num = 0;
-                        double denInput = 0;
-                        double denOutput = 0;
+                        // 既存コンテンツがない領域はスキップ
+                        if (outputWeights[candidateStart] < 1e-4f) continue;
 
-                        for (int i = 0; i < overlapRegion; i++)
+                        double num = 0, denA = 0, denB = 0;
+                        for (int i = 0; i < overlapLen; i++)
                         {
-                            float inVal = input[inputPtr + i];
-                            float outVal = output[targetOutPtr + i];
-                            num += inVal * outVal;
-                            denInput += inVal * inVal;
-                            denOutput += outVal * outVal;
+                            float a = input[inputStart + i];
+                            // 正規化された出力値（重みで割る）と比較 — 生の累積値ではなく実際の音声波形
+                            float b = outputWeights[candidateStart + i] > 1e-4f
+                                ? output[candidateStart + i] / outputWeights[candidateStart + i]
+                                : 0f;
+                            num += a * b;
+                            denA += a * a;
+                            denB += b * b;
                         }
+                        double den = Math.Sqrt(denA * denB);
+                        double corr = (den > 1e-6) ? num / den : 0;
 
-                        double correlation = 0;
-                        double den = Math.Sqrt(denInput * denOutput);
-                        if (den > 1e-6)
+                        if (corr > bestCorr)
                         {
-                            correlation = num / den;
-                        }
-                        else
-                        {
-                            correlation = num;
-                        }
-
-                        if (correlation > maxCorrelation)
-                        {
-                            maxCorrelation = correlation;
-                            bestDelay = delay;
+                            bestCorr = corr;
+                            bestOffset = offset;
                         }
                     }
                 }
 
-                int actualOutPtr = currentTargetPtr + bestDelay;
+                int actualStart = nominalOutputStart + bestOffset;
+                if (actualStart < 0) actualStart = 0;
 
-                while (output.Count < actualOutPtr + frameSize)
-                {
-                    output.Add(0f);
-                    outputWeights.Add(0f);
-                }
-
-                // クロスフェード重ね合わせ
+                // 全フレーム（最初のフレーム含む）をハニング窓付きでオーバーラップ加算
                 for (int i = 0; i < frameSize; i++)
                 {
-                    float w = window[i];
-                    float inputVal = input[inputPtr + i];
-                    int outIdx = actualOutPtr + i;
-
-                    output[outIdx] += inputVal * w;
-                    outputWeights[outIdx] += w;
+                    int idx = actualStart + i;
+                    if (idx >= outputLen) break;
+                    output[idx] += input[inputStart + i] * window[i];
+                    outputWeights[idx] += window[i];
                 }
-
-                inputPtr += hopAnalysis;
-                targetOutputPtr += hopSynthesis; // 次のステップの目標位置は、今回のローカルなbestDelayの影響を受けずに一定間隔で進める
             }
 
-            float[] result = new float[output.Count];
-            for (int i = 0; i < output.Count; i++)
+            // 出力の実効長を検出（末尾の無音を除外）
+            int actualLen = 0;
+            for (int i = outputLen - 1; i >= 0; i--)
             {
-                if (outputWeights[i] > 1e-4f)
-                {
-                    result[i] = output[i] / outputWeights[i];
-                }
-                else
-                {
-                    result[i] = output[i];
-                }
+                if (outputWeights[i] > 1e-4f) { actualLen = i + 1; break; }
+            }
+
+            // 重みで正規化して最終出力を生成
+            float[] result = new float[actualLen];
+            for (int i = 0; i < actualLen; i++)
+            {
+                result[i] = (outputWeights[i] > 1e-4f) ? output[i] / outputWeights[i] : 0f;
             }
 
             return result;
