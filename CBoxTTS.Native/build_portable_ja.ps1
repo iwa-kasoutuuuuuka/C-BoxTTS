@@ -108,9 +108,12 @@ if (-not (Test-Path $actualSourceModels)) {
 
 Write-Host "Using source models path: $actualSourceModels"
 
-Write-Host "Copying default voice prompt..."
-if (Test-Path "$actualSourceModels\default_voice.wav") {
-    Copy-Item -Path "$actualSourceModels\default_voice.wav" -Destination $targetModelsDir -Force
+Write-Host "Copying default voice prompts..."
+$voiceFiles = @("default_voice.wav", "default_voice_en.wav", "default_voice_ja.wav")
+foreach ($vFile in $voiceFiles) {
+    if (Test-Path "$actualSourceModels\$vFile") {
+        Copy-Item -Path "$actualSourceModels\$vFile" -Destination $targetModelsDir -Force
+    }
 }
 
 # 日本語版に必要なモデルのみをコピー (turbo, multilingual)

@@ -106,7 +106,10 @@ namespace CBoxTTS.Native
 
             var filesToDownload = new List<(string RemoteName, string LocalName)>();
             
-            // default_voice.wav は共通 (_modelsDir 直下)
+            // 言語・モデル固有のデフォルト参照音声プロンプトファイル（共通の models ディレクトリ直下）
+            string voiceLocalName = type == ModelType.English ? "../default_voice_en.wav" : "../default_voice_ja.wav";
+            filesToDownload.Add(("default_voice.wav", voiceLocalName));
+            // 互換用 default_voice.wav も配置
             filesToDownload.Add(("default_voice.wav", "../default_voice.wav"));
 
             // その他のファイルはモデル固有のフォルダへ元の名前のままダウンロード

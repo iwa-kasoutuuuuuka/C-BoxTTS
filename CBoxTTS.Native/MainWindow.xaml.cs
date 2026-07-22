@@ -211,6 +211,24 @@ namespace CBoxTTS.Native
                     RepetitionPenaltySlider.Value = defaultRepetitionPenalty;
                 }
 
+                // モデルの種類に応じた最適なボイスプロンプト音声の自動切替（デフォルト名の場合）
+                if (VoicePromptPathText != null)
+                {
+                    string currentText = VoicePromptPathText.Text;
+                    bool isDefaultVoiceName = string.IsNullOrWhiteSpace(currentText) || currentText.StartsWith("default_voice");
+                    if (isDefaultVoiceName)
+                    {
+                        string preferredVoice = selectedType == ModelType.English ? "default_voice_en.wav" : "default_voice_ja.wav";
+                        string fullPath = Path.Combine(AppContext.BaseDirectory, "models", preferredVoice);
+                        if (!File.Exists(fullPath))
+                        {
+                            // フォールバック
+                            preferredVoice = "default_voice.wav";
+                        }
+                        VoicePromptPathText.Text = preferredVoice;
+                    }
+                }
+
                 StatusText.Text = GetMsg($"{selectedType} モデルを準備中...", $"Preparing {selectedType} model...");
                 StatusText.Foreground = System.Windows.Media.Brushes.Orange;
                 
