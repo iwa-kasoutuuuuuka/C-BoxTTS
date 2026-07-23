@@ -112,7 +112,7 @@ if (-not (Test-Path $actualSourceModels)) {
 Write-Host "Using source models path: $actualSourceModels"
 
 Write-Host "Copying default voice prompts..."
-$voiceFiles = @("default_voice.wav", "default_voice_en.wav", "default_voice_ja.wav")
+$voiceFiles = @("default_voice.wav", "default_voice_en.wav", "default_voice_ja.wav", "default_voice_en_female.wav", "default_voice_en_male.wav")
 foreach ($vFile in $voiceFiles) {
     if (Test-Path "$actualSourceModels\$vFile") {
         Copy-Item -Path "$actualSourceModels\$vFile" -Destination $targetModelsDir -Force

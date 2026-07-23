@@ -190,13 +190,20 @@ namespace CBoxTTS.Native
                 // モデルの種類に応じて TemperatureSlider のデフォルト値を自動セット
                 float defaultTemp = selectedType switch
                 {
-                    ModelType.English => 0.8f,
+                    ModelType.English => 0.5f, // アメリカ英語の標準的なアクセントとクリアな音素発音を実現
                     ModelType.Turbo => 0.6f,
                     _ => 0.7f
                 };
                 if (TemperatureSlider != null)
                 {
                     TemperatureSlider.Value = defaultTemp;
+                }
+
+                // 英語モデル選択時は Exaggeration (抑揚/感情) のデフォルト値を 0.3 に自動最適化
+                if (selectedType == ModelType.English)
+                {
+                    if (ExaggerationSlider != null) ExaggerationSlider.Value = 0.3f;
+                    if (CfgWeightSlider != null) CfgWeightSlider.Value = 0.4f;
                 }
 
                 // モデルの種類に応じて RepetitionPenaltySlider のデフォルト値を自動セット
