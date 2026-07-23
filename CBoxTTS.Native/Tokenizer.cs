@@ -170,7 +170,7 @@ namespace CBoxTTS.Native
             Log($"=== Tokenizer.Encode 開始 ===");
             Log($"入力テキスト: \"{text}\", 言語トークンID: {languageToken}");
 
-            bool isEnglish = (languageToken == 708 || languageToken == 1);
+            bool isEnglish = (languageToken == 708 || languageToken == 1 || languageToken == 0);
             string processed = text;
             if (isEnglish)
             {
@@ -194,8 +194,16 @@ namespace CBoxTTS.Native
             }
             Log($"前処理・正規化後のテキスト: \"{normalized}\"");
 
-            var ids = new List<long> { StartToken, languageToken };
-            Log($"初期化トークン追加: StartToken({StartToken}), LanguageToken({languageToken})");
+            var ids = new List<long> { StartToken };
+            if (!isEnglish && languageToken > 0)
+            {
+                ids.Add(languageToken);
+                Log($"初期化トークン追加: StartToken({StartToken}), LanguageToken({languageToken})");
+            }
+            else
+            {
+                Log($"初期化トークン追加: StartToken({StartToken}) （英語モデルのため言語トークンは省略）");
+            }
 
             if (_isByteLevel)
             {
