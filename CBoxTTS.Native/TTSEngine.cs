@@ -898,7 +898,18 @@ namespace CBoxTTS.Native
                                 if (loopDetected) break;
                             }
 
-                            long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                            float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
+                            long nextToken;
+                            int minSpeechStepsCuda = (int)(inputIds.Length * 1.8f) + 10;
+                            if (step >= minSpeechStepsCuda && eosLogitValCuda > 1.8f)
+                            {
+                                nextToken = stopSpeechToken;
+                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2})。正常終了します。");
+                            }
+                            else
+                            {
+                                nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                            }
                             generateTokens.Add(nextToken);
 
                             if (nextToken == stopSpeechToken)
@@ -1011,7 +1022,7 @@ namespace CBoxTTS.Native
                             }
                             else
                             {
-                                posIds = new long[] { (long)(totalSeqLen - 1) };
+                                posIds = new long[] { (long)(totalSeqLen + step - 1) };
                             }
                             posTensor = new DenseTensor<long>(posIds, new[] { 1, posIds.Length });
                             lmInputs.Add(NamedOnnxValue.CreateFromTensor("position_ids", posTensor));
@@ -1146,7 +1157,18 @@ namespace CBoxTTS.Native
                             if (loopDetected) break;
                         }
 
-                        long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                        float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
+                        long nextToken;
+                        int minSpeechSteps = (int)(inputIds.Length * 1.8f) + 10;
+                        if (step >= minSpeechSteps && eosLogitVal > 1.8f)
+                        {
+                            nextToken = stopSpeechToken;
+                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechSteps}, EOS Logit={eosLogitVal:F2})。正常終了します。");
+                        }
+                        else
+                        {
+                            nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                        }
                         generateTokens.Add(nextToken);
 
                         float eosLogit = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
