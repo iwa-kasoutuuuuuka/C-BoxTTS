@@ -97,7 +97,7 @@
                                 <DockPanel Margin="0,0,0,15">
                                     <TextBlock x:Name="CfgWeightLabel" Text="CFG/ペース (CFG/Pace)" Foreground="White" DockPanel.Dock="Top" Margin="0,0,0,5"/>
                                     <TextBox x:Name="CfgWeightText" Text="{Binding ElementName=CfgWeightSlider, Path=Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat={}{0:F2}}" LostFocus="CfgWeightText_LostFocus" KeyDown="CfgWeightText_KeyDown" Foreground="{StaticResource PrimaryBrush}" DockPanel.Dock="Right" Width="50" Height="25" TextAlignment="Right" VerticalContentAlignment="Center" Background="#252525" BorderBrush="#444" BorderThickness="1" Margin="5,0,0,0"/>
-                                    <Slider x:Name="CfgWeightSlider" Minimum="0" Maximum="1" Value="0.5" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                    <Slider x:Name="CfgWeightSlider" Minimum="0" Maximum="1" Value="0.25" TickFrequency="0.01" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
                                 </DockPanel>
 
                                 <!-- 反復ペナルティ (Repetition Penalty) -->
