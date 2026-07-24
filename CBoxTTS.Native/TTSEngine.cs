@@ -494,7 +494,7 @@ namespace CBoxTTS.Native
                 var positionIds = new long[inputIdsLong.Length];
                 for (int i = 0; i < inputIdsLong.Length; i++)
                 {
-                    positionIds[i] = inputIdsLong[i] >= startSpeechToken ? 0 : (long)(i - 1);
+                    positionIds[i] = inputIdsLong[i] >= startSpeechToken ? 0 : Math.Max(0L, (long)(i - 1));
                 }
                 var positionIdsTensor = new DenseTensor<long>(positionIds, new[] { 1, positionIds.Length });
                 var exaggerationTensor = new DenseTensor<float>(new[] { exaggeration }, new[] { 1 });
@@ -1298,6 +1298,17 @@ namespace CBoxTTS.Native
                 }
                 
                 Log($"チャンク {i+1}/{sentences.Count}: \"{sentence}\"");
+
+                // 実質的に意味のない極短テキスト（英字2文字未満＝数字・記号のみ等）は合成せずスキップ
+                // 数字マーカーだけのチャンクがモデルに渡されると、コンテキスト不足でハルシネーション（意味不明な文章の生成）が発生するため
+                string lettersOnly = new string(sentence.Where(c => char.IsLetter(c)).ToArray());
+                if (lettersOnly.Length < 2)
+                {
+                    Log($"チャンク {i+1} は意味のあるテキストが不足しているためスキップします: \"{sentence}\"");
+                    allWavChunks.Add(Array.Empty<float>());
+                    continue;
+                }
+
                 statusCallback?.Invoke($"音声合成中... ({i+1}/{sentences.Count})");
                 
                 string processedText = sentence;
@@ -1562,8 +1573,9 @@ namespace CBoxTTS.Native
                         merged.Add(current.ToString());
                         current.Clear();
                     }
-                    // 数字マーカーは単独チャンクとして追加
-                    merged.Add(sentence);
+                    // 数字マーカーは単独チャンクにせず、直後の文と結合するために current に追記
+                    // 単独で合成するとコンテキスト不足でハルシネーション（意味不明な文章の生成）が発生するため
+                    current.Append(sentence + " ");
                 }
                 else
                 {
