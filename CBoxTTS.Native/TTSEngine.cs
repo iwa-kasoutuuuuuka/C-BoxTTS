@@ -1298,6 +1298,41 @@ namespace CBoxTTS.Native
                 sentences.AddRange(split);
             }
 
+            // 英語: カンマ分割で生じた極端に短いチャンク（トークン不足でループ崩壊の原因）を直後のチャンクと結合
+            // また、先頭/末尾に孤立した引用符が残った場合はクリーンアップする
+            if (isEnglish)
+            {
+                // Pass 1: 先頭・末尾の孤立した引用符を除去
+                for (int k = 0; k < sentences.Count; k++)
+                {
+                    // 先頭が引用符のみ・または引用符+スペースで始まる孤立ケースを除去
+                    var s = sentences[k];
+                    // 先頭の孤立クォート（" " ' 〝 〟 「 」など）を除去
+                    s = System.Text.RegularExpressions.Regex.Replace(s, @"^[\""\u201c\u201d\u2018\u2019\u300c\u300d]+\s*", "");
+                    // 末尾の孤立クォートも除去
+                    s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*[\""\u201c\u201d\u2018\u2019\u300c\u300d]+$", "");
+                    sentences[k] = s.Trim();
+                }
+                sentences = sentences.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+
+                // Pass 2: 25文字未満の極端に短いチャンクを直後のチャンクに結合（コンテキスト不足防止）
+                var merged2 = new List<string>();
+                for (int k = 0; k < sentences.Count; k++)
+                {
+                    string s = sentences[k];
+                    if (s.Length < 25 && k + 1 < sentences.Count)
+                    {
+                        // 次のチャンクと結合する。合計が120文字以内ならさらにマージ可能
+                        sentences[k + 1] = s + " " + sentences[k + 1];
+                    }
+                    else
+                    {
+                        merged2.Add(s);
+                    }
+                }
+                sentences = merged2;
+            }
+
             Log($"文分割結果: {sentences.Count} 文");
             for (int k = 0; k < sentences.Count; k++)
             {
