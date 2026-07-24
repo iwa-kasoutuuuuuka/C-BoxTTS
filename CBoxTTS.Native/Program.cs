@@ -11,10 +11,14 @@ namespace CBoxTTS.Native
         [STAThread]
         public static void Main(string[] args)
         {
-            if (args.Contains("--test"))
+            var cmdArgs = Environment.GetCommandLineArgs();
+            try { File.WriteAllText("startup.log", $"[{DateTime.Now}] Main called. Args: {string.Join(", ", cmdArgs)}\r\n"); } catch { }
+
+            if (cmdArgs.Any(a => a.Equals("--test", StringComparison.OrdinalIgnoreCase)) || (args != null && args.Any(a => a.Equals("--test", StringComparison.OrdinalIgnoreCase))))
             {
                 try
                 {
+                    File.AppendAllText("startup.log", "Running Test Harness...\r\n");
                     RunTestHarness().GetAwaiter().GetResult();
                 }
                 catch (Exception ex)

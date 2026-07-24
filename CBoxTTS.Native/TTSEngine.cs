@@ -33,6 +33,15 @@ namespace CBoxTTS.Native
         // embed_tokens.onnx のEmbedding行列の語彙サイズ（LoadModel 優先時自動検出）
         private long _embedVocabSize = -1;
 
+        static TTSEngine()
+        {
+            try
+            {
+                Environment.SetEnvironmentVariable("ALLOW_RELEASED_ONNX_OPSET_ONLY", "0");
+            }
+            catch { }
+        }
+
         // モデルごとのファイル定義
         private string GetLMFileName(ModelType type) => type switch
         {
@@ -248,6 +257,7 @@ namespace CBoxTTS.Native
                         try
                         {
                             var options = new SessionOptions();
+                            options.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
 #if USE_CUDA
                             try
                             {
@@ -275,9 +285,10 @@ namespace CBoxTTS.Native
                             {
                                 Log($"[CUDA初期化失敗、CPUにフォールバックします] {baseName}: {cudaEx.Message}");
                                 options.Dispose();
-                                options = new SessionOptions();
-                                options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
-                                session = new InferenceSession(path, options);
+                                 var cpuOptions = new SessionOptions();
+                                cpuOptions.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
+                                cpuOptions.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                                session = new InferenceSession(path, cpuOptions);
                                 detectedBackend = "CPU (Fallback)";
                                 Log($"[Session成功:CPU (CUDAフォールバック)] {baseName}");
                             }
@@ -294,6 +305,7 @@ namespace CBoxTTS.Native
                                 Log($"[DirectML初期化失敗、CPUにフォールバックします] {baseName}: {dmlEx.Message}");
                                 options.Dispose();
                                 options = new SessionOptions();
+                                options.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
                                 options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
                                 session = new InferenceSession(path, options);
                                 detectedBackend = "CPU (Fallback)";

@@ -191,6 +191,13 @@ MyTech,my tech
   - 英語版・英語モデル選択時には自動的に英語ネイティブの参照音声（`default_voice_en.wav`）がセットされ、モデル本来の極めて自然でクリアな標準英語発音が出力されるようになりました。
   - また、日本語話者の参照音声（自分の声など）を保持したまま英語を読ませる場合でも、UIの `CFG Weight` (ペース) を **`0.3` 〜 `0.4`** に調整することで、参照音声のアクセント追従が緩和され、綺麗で聞き取りやすい英語アクセントに補正されます。
 
+### 12. ONNX Runtime 1.20 opset 20 アラインメントと C# 読み込みの完全安定化
+- **現象**: ONNX Runtime 1.20 へのライブラリアップデートに伴い、C# の `InferenceSession` 初期化時に `Unsupported model IR version: 10` や `Opset 21 is under development` および `GroupQueryAttention` カスタム演算子の型チェック定義違反（`InvalidGraph`）が発生するケースがありました。
+- **対策**:
+  - `TTSEngine.cs` の静的コンストラクタで環境変数 `ALLOW_RELEASED_ONNX_OPSET_ONLY = "0"` を自動設定し、未リリース opset ガードを解除。
+  - Python スクリプトを用いて全 ONNX モデルの `ir_version` を `9`、インポートするデフォルト opset を `20`（`com.microsoft` opset を `1`）へ整合し、`GroupQueryAttention` ノードの不整合な `softcap` 属性を除去。
+  - `language_model.onnx` 内の外部データ保持ファイル名 (`language_model.onnx_data`) をモデル initializer 内部データと同期配置し、CUDA / DirectML / CPU フォールバックいずれの環境でもエラーゼロで高速ロードされるように修復しました。
+
 ---
 
 ## 🎛️ UIパラメータ（スライダー）の調整ガイド
