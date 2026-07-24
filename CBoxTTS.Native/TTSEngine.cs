@@ -591,9 +591,12 @@ namespace CBoxTTS.Native
 
                 // generate_tokens の初期化
                 var generateTokens = new List<long> { startSpeechToken };
-                
-                int maxNewTokens = 760; // 安全のための最大トークン制限（英語長文でも途中打ち切りを防ぐ）
-                Log("自己回帰ループ開始...");
+
+                // 入力テキスト長（トークン数）に応じた動的な最大トークン制限
+                // (目安: 1テキストトークンあたり約 4〜5 音声トークン。余裕を持って inputIds.Length * 7 + 80 を設定し、モデルの無限暴走・ハルシネーションを確実に遮断)
+                int dynamicMaxTokens = Math.Min(760, Math.Max(150, inputIds.Length * 7 + 80));
+                int maxNewTokens = dynamicMaxTokens;
+                Log($"自己回帰ループ開始... (入力トークン数={inputIds.Length}, 動的最大トークン上限={maxNewTokens})");
 
                 if (false && ActiveBackend == "CUDA")
                 {
@@ -1245,7 +1248,7 @@ namespace CBoxTTS.Native
             
             bool isEnglish = (langToken == 708 || langToken == 1);
 
-            // 入力テキストを改行単位で事前分割し、1行目と2行目が不正に結合される現象や1行目のハルシネーションを防止
+            // 入力テキストを改行単位で事前分割し、行構造を保持
             var rawLines = fullText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
                                    .Select(l => l.Trim())
                                    .Where(l => !string.IsNullOrEmpty(l))
@@ -1261,28 +1264,17 @@ namespace CBoxTTS.Native
                     lineText = EnglishNormalizer.Normalize(rawLine);
                 }
 
-                bool hasNumberMarker = System.Text.RegularExpressions.Regex.IsMatch(lineText, @"^[0-9]+\s*[\.,\)]+\s+", System.Text.RegularExpressions.RegexOptions.Multiline);
-                if (isEnglish && lineText.Length <= 350 && !hasNumberMarker)
-                {
-                    sentences.Add(lineText);
-                }
-                else
-                {
-                    var split = SplitSentences(lineText);
-                    if (isEnglish && split.Count > 1)
-                    {
-                        split = MergeShortSentencesForEnglish(split, 350);
-                    }
-                    sentences.AddRange(split);
-                }
+                // 1文単位で分割。英語で120文字を超える長文の場合のみカンマ等の読点でも節分割
+                bool needCommaSplit = isEnglish && lineText.Length > 120;
+                var split = SplitSentences(lineText, needCommaSplit);
+                sentences.AddRange(split);
             }
 
-            if (isEnglish && sentences.Count > 1)
-            {
-                sentences = MergeShortSentencesForEnglish(sentences, 350);
-                Log($"全英語文結合後: {sentences.Count} チャンク");
-            }
             Log($"文分割結果: {sentences.Count} 文");
+            for (int k = 0; k < sentences.Count; k++)
+            {
+                Log($"  [文{k+1}/{sentences.Count}] \"{sentences[k]}\" ({sentences[k].Length}文字)");
+            }
             
             if (sentences.Count <= 1)
             {
@@ -1521,9 +1513,9 @@ namespace CBoxTTS.Native
         }
 
         /// <summary>
-        /// テキストを句読点で文単位に分割する。文頭の数字マーカー(1, や 2. など)も個別に分割する。
+        /// テキストを句読点やカンマで文・節単位に分割する。
         /// </summary>
-        private List<string> SplitSentences(string text)
+        private List<string> SplitSentences(string text, bool splitOnCommas = false)
         {
             var sentences = new List<string>();
             
@@ -1535,8 +1527,9 @@ namespace CBoxTTS.Native
                 System.Text.RegularExpressions.RegexOptions.Multiline
             );
 
-            // 句読点を保持しつつ分割。連続する句読点（！？など）を一つの区切りとして扱う
-            var segments = System.Text.RegularExpressions.Regex.Split(processedText, @"([。！？\n\.!\?]+)");
+            // 句読点を保持しつつ分割。長文時はカンマ(,)や読点(、)やセミコロン(;)コロン(:)も区切りとして許容
+            string pattern = splitOnCommas ? @"([。！？\n\.!\?,;:;、]+)" : @"([。！？\n\.!\?]+)";
+            var segments = System.Text.RegularExpressions.Regex.Split(processedText, pattern);
             
             int i = 0;
             while (i < segments.Length)

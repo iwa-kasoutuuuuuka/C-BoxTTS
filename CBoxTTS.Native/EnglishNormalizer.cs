@@ -100,6 +100,7 @@ namespace CBoxTTS.Native
         // 頭字語の例外（そのまま単語として発音する既知の頭字語）
         private static readonly HashSet<string> KnownAcronymsAsWords = new(StringComparer.OrdinalIgnoreCase)
         {
+            "AI", "UI", "API", "ID", "SDK", "ML", "DL", "GPU", "CPU",
             "NASA", "NATO", "ASAP", "SCUBA", "LASER", "RADAR", "AIDS", "JPEG", "GIF",
             "BIOS", "LAN", "WAN", "RAM", "SIM", "VRAM", "SCADA", "PID"
         };
