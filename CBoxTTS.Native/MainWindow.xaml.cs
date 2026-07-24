@@ -789,15 +789,28 @@ namespace CBoxTTS.Native
                     }
                     else
                     {
-                        // 複数行の場合は連番を付与して保存
+                        // 複数行の場合は桁揃え連番（_01, _02...）とテキスト冒頭（最大10文字）を付与して保存
                         string dir = Path.GetDirectoryName(baseFilePath) ?? "";
                         string filenameNoExt = Path.GetFileNameWithoutExtension(baseFilePath);
                         string ext = Path.GetExtension(baseFilePath);
 
+                        // 総行数に応じたゼロパディング桁数（最低2桁: _01, _02 ...）
+                        int padDigits = Math.Max(2, lines.Count.ToString().Length);
+                        char[] invalidChars = Path.GetInvalidFileNameChars();
+
                         for (int i = 0; i < lines.Count; i++)
                         {
                             string line = lines[i];
-                            string numberedPath = Path.Combine(dir, $"{filenameNoExt}_{i + 1}{ext}");
+                            string indexStr = (i + 1).ToString($"D{padDigits}");
+
+                            // テキストの冒頭からファイル名として安全な文字を最大10文字抽出
+                            string safeSnippet = new string(line.Where(c => !invalidChars.Contains(c) && c != '\r' && c != '\n' && c != '\t').Take(10).ToArray()).Trim();
+                            
+                            string fileName = string.IsNullOrEmpty(safeSnippet)
+                                ? $"{filenameNoExt}_{indexStr}{ext}"
+                                : $"{filenameNoExt}_{indexStr}_{safeSnippet}{ext}";
+
+                            string numberedPath = Path.Combine(dir, fileName);
                             
                             StatusText.Text = GetMsg($"保存用に合成中... ({i + 1}/{lines.Count})", $"Generating for saving... ({i + 1}/{lines.Count})");
                             
