@@ -593,8 +593,8 @@ namespace CBoxTTS.Native
                 var generateTokens = new List<long> { startSpeechToken };
 
                 // 入力テキスト長（トークン数）に応じた動的な最大トークン制限
-                // (目安: 1テキストトークンあたり約 4〜5 音声トークン。余裕を持って inputIds.Length * 7 + 80 を設定し、モデルの無限暴走・ハルシネーションを確実に遮断)
-                int dynamicMaxTokens = Math.Min(760, Math.Max(150, inputIds.Length * 7 + 80));
+                // (英文の実効発声速度: 1テキストトークンあたり約 3.0〜3.2 音声トークン。余裕を持って inputIds.Length * 3.2 + 35 を設定し、無音後のハルシネーションを物理遮断)
+                int dynamicMaxTokens = Math.Min(450, Math.Max(50, (int)Math.Ceiling(inputIds.Length * 3.2f) + 35));
                 int maxNewTokens = dynamicMaxTokens;
                 Log($"自己回帰ループ開始... (入力トークン数={inputIds.Length}, 動的最大トークン上限={maxNewTokens})");
 
@@ -912,9 +912,9 @@ namespace CBoxTTS.Native
                                 Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
                             }
 
-                            // 次の入力埋め込みを生成 (GPU-direct binding)
                             var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
-                            var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
+                            long nextPos = (long)(totalSeqLen + step);
+                            var nextPositionTensor = new DenseTensor<long>(new[] { nextPos }, new[] { 1, 1 });
 
                             using (var embedIoBinding = _embedTokens.CreateIoBinding())
                             {
@@ -1094,6 +1094,7 @@ namespace CBoxTTS.Native
                         var uniqueTokens = new HashSet<long>(generateTokens);
                         foreach (long tokenId in uniqueTokens)
                         {
+                            if (tokenId == stopSpeechToken) continue; // EOS トークンにはペナルティをかけない
                             if (tokenId >= 0 && tokenId < vocabSize)
                             {
                                 if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
@@ -1107,6 +1108,7 @@ namespace CBoxTTS.Native
                         var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
                         foreach (long tokenId in recentTokens)
                         {
+                            if (tokenId == stopSpeechToken) continue; // EOS トークンにはペナルティをかけない
                             if (tokenId >= 0 && tokenId < vocabSize)
                             {
                                 if (logits[tokenId] < 0) logits[tokenId] *= strongPenalty;
@@ -1119,7 +1121,7 @@ namespace CBoxTTS.Native
                             bool loopDetected = false;
                             int checkCount = Math.Min(generateTokens.Count, 48);
                             var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
-                            for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
+                            for (int patLen = 1; patLen <= 8 && !loopDetected; patLen++)
                             {
                                 if (recent.Length < patLen * 3) continue;
                                 var tail = recent.Skip(recent.Length - patLen).ToArray();
@@ -1133,7 +1135,9 @@ namespace CBoxTTS.Native
                                     }
                                     if (match) matchCount++;
                                 }
-                                if (matchCount >= 3)
+                                // 短いパターン（1〜2トークン）は3回繰り返し、長いパターンは2〜3回繰り返しでループ判定
+                                int requiredMatches = patLen <= 2 ? 3 : 2;
+                                if (matchCount >= requiredMatches)
                                 {
                                     Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
                                     loopDetected = true;
@@ -1145,19 +1149,21 @@ namespace CBoxTTS.Native
                         long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
                         generateTokens.Add(nextToken);
 
+                        float eosLogit = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                         if (nextToken == stopSpeechToken)
                         {
-                            Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
+                            Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step} (EOS Logit: {eosLogit:F2})");
                             break;
                         }
 
-                        if (step < 20 || step % 50 == 0)
+                        if (step < 10 || step % 25 == 0 || eosLogit > 0f)
                         {
-                            Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]})");
+                            Log($"ステップ {step}: 生成トークンID = {nextToken} (Logit: {logits[(int)nextToken]:F2}, EOS Logit: {eosLogit:F2})");
                         }
 
                         var nextTokenTensor = new DenseTensor<long>(new[] { nextToken }, new[] { 1, 1 });
-                        var nextPositionTensor = new DenseTensor<long>(new[] { (long)(step + 1) }, new[] { 1, 1 });
+                        long nextPos = (long)(totalSeqLen + step);
+                        var nextPositionTensor = new DenseTensor<long>(new[] { nextPos }, new[] { 1, 1 });
                         var nextEmbedInputs = new List<NamedOnnxValue>
                         {
                             NamedOnnxValue.CreateFromTensor("input_ids", nextTokenTensor)
@@ -1225,7 +1231,7 @@ namespace CBoxTTS.Native
                 Log($"デコーダー出力: 先頭0.1秒の最大振幅 = {diagMaxAbs:F4}（0に近い場合は先頭が無音）");
 
                 // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す
-                wavData = TrimSilence(wavData, 0.005f);
+                wavData = TrimSilence(wavData, 0.018f);
 
                 return wavData;
             });
@@ -1329,7 +1335,7 @@ namespace CBoxTTS.Native
                 
                 if (wav != null && wav.Length > 0)
                 {
-                    wav = TrimSilence(wav, 0.005f); // 各チャンクの冒頭・末尾の無音を除去（子音の頭切れを防ぐため低いしきい値を使用）
+                    wav = TrimSilence(wav, 0.018f); // 各チャンクの冒頭・末尾のノイズ・無音区間を適正トリム
                     allWavChunks.Add(wav);
                 }
                 else
@@ -1462,7 +1468,7 @@ namespace CBoxTTS.Native
         /// </summary>
         /// <param name="audio">音声波形データ</param>
         /// <param name="threshold">無音判定しきい値（振幅の絶対値）</param>
-        private float[] TrimSilence(float[] audio, float threshold = 0.01f)
+        private float[] TrimSilence(float[] audio, float threshold = 0.018f)
         {
             if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
 
@@ -1488,8 +1494,8 @@ namespace CBoxTTS.Native
                 }
             }
 
-            // トリム前後に少し余裕を持たせる（1200サンプル = 0.05秒。子音の頭切れを防ぐための十分なマージン）
-            int margin = 1200;
+            // トリム前後に少し余裕を持たせる（960サンプル = 40ms。語頭・語尾の子音の音切れを防ぐマージン）
+            int margin = 960;
             startIdx = Math.Max(0, startIdx - margin);
             endIdx = Math.Min(audio.Length - 1, endIdx + margin);
 
