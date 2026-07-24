@@ -84,7 +84,7 @@ namespace CBoxTTS.Native
         private static readonly Regex IntegerRegex = new Regex(@"\b\d+(?:,\d+)*\b", RegexOptions.Compiled);
         private static readonly Regex AmpSpacedRegex = new Regex(@"\s+&\s+", RegexOptions.Compiled);
         private static readonly Regex AmpWordRegex = new Regex(@"\b&\b", RegexOptions.Compiled);
-        private static readonly Regex MultiSpaceRegex = new Regex(@"\s+", RegexOptions.Compiled);
+        private static readonly Regex MultiSpaceRegex = new Regex(@"[ \t]+", RegexOptions.Compiled);
 
         private static readonly List<(Regex Regex, string Replacement)> CompiledAbbreviations = new();
 

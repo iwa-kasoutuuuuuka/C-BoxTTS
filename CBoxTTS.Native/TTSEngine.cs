@@ -1243,41 +1243,55 @@ namespace CBoxTTS.Native
                 tokenizer.SetEmbeddingVocabSize(_embedVocabSize);
             }
             
-            string normalizedText = fullText;
-            if (langToken == 708 || langToken == 1) // 英語 ([en] トークン または 英語専用モデルの UNK トークン)
+            bool isEnglish = (langToken == 708 || langToken == 1);
+
+            // 入力テキストを改行単位で事前分割し、1行目と2行目が不正に結合される現象や1行目のハルシネーションを防止
+            var rawLines = fullText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+                                   .Select(l => l.Trim())
+                                   .Where(l => !string.IsNullOrEmpty(l))
+                                   .ToList();
+
+            var sentences = new List<string>();
+
+            foreach (var rawLine in rawLines)
             {
-                normalizedText = EnglishNormalizer.Normalize(fullText);
+                string lineText = rawLine;
+                if (isEnglish)
+                {
+                    lineText = EnglishNormalizer.Normalize(rawLine);
+                }
+
+                bool hasNumberMarker = System.Text.RegularExpressions.Regex.IsMatch(lineText, @"^[0-9]+\s*[\.,\)]+\s+", System.Text.RegularExpressions.RegexOptions.Multiline);
+                if (isEnglish && lineText.Length <= 350 && !hasNumberMarker)
+                {
+                    sentences.Add(lineText);
+                }
+                else
+                {
+                    var split = SplitSentences(lineText);
+                    if (isEnglish && split.Count > 1)
+                    {
+                        split = MergeShortSentencesForEnglish(split, 350);
+                    }
+                    sentences.AddRange(split);
+                }
             }
 
-            // 英語の場合、テキストが比較的短い（350文字以下）なら分割せずに1文として処理して流暢性を劇的に向上させる
-            // ただし、文頭に数字マーカー（1, や 2. など）がある場合は分割して間を空けるためにショートカットを回避する
-            bool isEnglish = (langToken == 708 || langToken == 1);
-            bool hasNumberMarker = System.Text.RegularExpressions.Regex.IsMatch(normalizedText, @"(?<=^|\n)[0-9]+\s*[\.,\)]+\s+", System.Text.RegularExpressions.RegexOptions.Multiline);
-            List<string> sentences;
-            if (isEnglish && normalizedText.Length <= 350 && !hasNumberMarker)
+            if (isEnglish && sentences.Count > 1)
             {
-                sentences = new List<string> { normalizedText };
-                Log("英語テキストが350文字以下のため、分割せずに1つの文として合成します。");
-            }
-            else
-            {
-                sentences = SplitSentences(normalizedText);
-                // 英語の場合、短い文を前の文に結合してチャンク数を減らし流暢性を向上
-                if (isEnglish && sentences.Count > 1)
-                {
-                    sentences = MergeShortSentencesForEnglish(sentences, 350);
-                    Log($"英語文結合後: {sentences.Count} チャンク");
-                }
+                sentences = MergeShortSentencesForEnglish(sentences, 350);
+                Log($"全英語文結合後: {sentences.Count} チャンク");
             }
             Log($"文分割結果: {sentences.Count} 文");
             
             if (sentences.Count <= 1)
             {
                 // 1文以下の場合はそのまま合成
-                string processedText = normalizedText;
+                string targetSentence = sentences.FirstOrDefault() ?? "";
+                string processedText = targetSentence;
                 if (langToken == 723) // 日本語
                 {
-                    var analysis = morph.Analyze(normalizedText);
+                    var analysis = morph.Analyze(targetSentence);
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
@@ -1513,11 +1527,11 @@ namespace CBoxTTS.Native
         {
             var sentences = new List<string>();
             
-            // 文頭の数字リストマーカー (例: "1, ", "1,, ", "2. ", "10) ") の後に改行を挟んで通常分割に回す
+            // 文頭の数字リストマーカー (例: "1, ", "1,, ", "2. ", "10) ") の後にスペースを挟んで通常分割に回す
             string processedText = System.Text.RegularExpressions.Regex.Replace(
                 text, 
                 @"(?<=^|\n)([0-9]+\s*[\.,\)]+)\s+", 
-                "$1\n",
+                "$1 ",
                 System.Text.RegularExpressions.RegexOptions.Multiline
             );
 
