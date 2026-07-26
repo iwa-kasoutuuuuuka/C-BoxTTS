@@ -456,7 +456,8 @@ namespace CBoxTTS.Native
                 Log($"参照音声ロード完了: {refAudio.Length} サンプル ({(double)refAudio.Length / 24000:F2}秒)");
 
                 // 1b. 参照音声の前処理（無音トリム + 音量正規化 + 10秒制限）
-                refAudio = TrimSilence(refAudio, 0.01f);
+                // ref音声は先頭マージン960（40ms）でタイトにトリム。生成音声とは別マージンを使用する。
+                refAudio = TrimSilence(refAudio, 0.01f, startMargin: 960, endMargin: 960);
                 refAudio = NormalizeAudioVolume(refAudio);
                 const int maxRefSamples = 24000 * 10; // 10秒制限
                 if (refAudio.Length > maxRefSamples)
@@ -1392,7 +1393,7 @@ namespace CBoxTTS.Native
                 
                 if (wav != null && wav.Length > 0)
                 {
-                    wav = TrimSilence(wav, 0.018f); // 各チャンクの冒頭・末尾のノイズ・無音区間を適正トリム
+                    // GenerateAsync内でTrimSilence適用済み。ここでの二重適用は先頭音声を誤削除する原因となるため行わない。
                     allWavChunks.Add(wav);
                 }
                 else
@@ -1521,11 +1522,12 @@ namespace CBoxTTS.Native
 
         /// <summary>
         /// 音声波形の先頭と末尾の無音区間をトリムする。
-        /// 参照音声の前処理で使用し、エンコーダへの入力品質を向上させる。
         /// </summary>
         /// <param name="audio">音声波形データ</param>
         /// <param name="threshold">無音判定しきい値（振幅の絶対値）</param>
-        private float[] TrimSilence(float[] audio, float threshold = 0.018f)
+        /// <param name="startMargin">先頭側に残すマージン（サンプル数）。生成音声は2400（100ms）推奨。ref音声は960（40ms）推奨。</param>
+        /// <param name="endMargin">末尾側に残すマージン（サンプル数）</param>
+        private float[] TrimSilence(float[] audio, float threshold = 0.018f, int startMargin = 2400, int endMargin = 960)
         {
             if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
 
@@ -1551,10 +1553,9 @@ namespace CBoxTTS.Native
                 }
             }
 
-            // トリム前後に少し余裕を持たせる（960サンプル = 40ms。語頭・語尾の子音の音切れを防ぐマージン）
-            int margin = 960;
-            startIdx = Math.Max(0, startIdx - margin);
-            endIdx = Math.Min(audio.Length - 1, endIdx + margin);
+            // トリム前後にマージンを持たせる。先頭側と末尾側に個別マージンを適用。
+            startIdx = Math.Max(0, startIdx - startMargin);
+            endIdx = Math.Min(audio.Length - 1, endIdx + endMargin);
 
             int trimmedLength = endIdx - startIdx + 1;
             if (trimmedLength <= 0 || trimmedLength >= audio.Length)
