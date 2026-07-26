@@ -848,55 +848,53 @@ namespace CBoxTTS.Native
                             }
 
                             // ----------------- 3. ペナルティの適用とサンプリング -----------------
-                            var uniqueTokens = new HashSet<long>(generateTokens);
-                            foreach (long tokenId in uniqueTokens)
+                            // ペナルティは「直近 4 トークン」以内の短い即時重複（スタック・ループ）にのみマイナス補正
+                            float penValue = repetitionPenalty - 1.0f;
+                            if (penValue > 0.001f)
                             {
-                                if (tokenId >= 0 && tokenId < vocabSize)
+                                const int recentWindow = 4;
+                                int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
+                                for (int rIdx = recentStart; rIdx < generateTokens.Count; rIdx++)
                                 {
-                                    if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
-                                    else logits[tokenId] /= repetitionPenalty;
-                                }
-                            }
-
-                            const int recentWindow = 64;
-                            float strongPenalty = repetitionPenalty * 1.3f;
-                            int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
-                            var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
-                            foreach (long tokenId in recentTokens)
-                            {
-                                if (tokenId >= 0 && tokenId < vocabSize)
-                                {
-                                    if (logits[tokenId] < 0) logits[tokenId] *= strongPenalty;
-                                    else logits[tokenId] /= strongPenalty;
+                                    long tokenId = generateTokens[rIdx];
+                                    if (tokenId == stopSpeechToken) continue;
+                                    if (tokenId >= 0 && tokenId < vocabSize)
+                                    {
+                                        logits[tokenId] -= penValue * 2.0f;
+                                    }
                                 }
                             }
 
                             if (generateTokens.Count >= 16)
                             {
-                                bool loopDetected = false;
-                                int checkCount = Math.Min(generateTokens.Count, 48);
-                                var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
-                                for (int patLen = 3; patLen <= 8 && !loopDetected; patLen++)
+                                int minSpeechStepsCheck = (int)(inputIds.Length * 1.8f) + 10;
+                                if (step >= minSpeechStepsCheck)
                                 {
-                                    if (recent.Length < patLen * 3) continue;
-                                    var tail = recent.Skip(recent.Length - patLen).ToArray();
-                                    int matchCount = 1;
-                                    for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
+                                    bool loopDetected = false;
+                                    int checkCount = Math.Min(generateTokens.Count, 48);
+                                    var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
+                                    for (int patLen = 4; patLen <= 8 && !loopDetected; patLen++)
                                     {
-                                        bool match = true;
-                                        for (int k = 0; k < patLen; k++)
+                                        if (recent.Length < patLen * 3) continue;
+                                        var tail = recent.Skip(recent.Length - patLen).ToArray();
+                                        int matchCount = 1;
+                                        for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
                                         {
-                                            if (recent[pos + k] != tail[k]) { match = false; break; }
+                                            bool match = true;
+                                            for (int k = 0; k < patLen; k++)
+                                            {
+                                                if (recent[pos + k] != tail[k]) { match = false; break; }
+                                            }
+                                            if (match) matchCount++;
                                         }
-                                        if (match) matchCount++;
+                                        if (matchCount >= 3)
+                                        {
+                                            Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
+                                            loopDetected = true;
+                                        }
                                     }
-                                    if (matchCount >= 3)
-                                    {
-                                        Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
-                                        loopDetected = true;
-                                    }
+                                    if (loopDetected) break;
                                 }
-                                if (loopDetected) break;
                             }
 
                             float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
@@ -1103,59 +1101,53 @@ namespace CBoxTTS.Native
                             logits = condLogits;
                         }
 
-                        var uniqueTokens = new HashSet<long>(generateTokens);
-                        foreach (long tokenId in uniqueTokens)
+                        // ----------------- 3. ペナルティの適用とサンプリング -----------------
+                        float penValue = repetitionPenalty - 1.0f;
+                        if (penValue > 0.001f)
                         {
-                            if (tokenId == stopSpeechToken) continue; // EOS トークンにはペナルティをかけない
-                            if (tokenId >= 0 && tokenId < vocabSize)
+                            const int recentWindow = 4;
+                            int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
+                            for (int rIdx = recentStart; rIdx < generateTokens.Count; rIdx++)
                             {
-                                if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
-                                else logits[tokenId] /= repetitionPenalty;
-                            }
-                        }
-
-                        const int recentWindow = 64;
-                        float strongPenalty = repetitionPenalty * 1.3f;
-                        int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
-                        var recentTokens = new HashSet<long>(generateTokens.Skip(recentStart));
-                        foreach (long tokenId in recentTokens)
-                        {
-                            if (tokenId == stopSpeechToken) continue; // EOS トークンにはペナルティをかけない
-                            if (tokenId >= 0 && tokenId < vocabSize)
-                            {
-                                if (logits[tokenId] < 0) logits[tokenId] *= strongPenalty;
-                                else logits[tokenId] /= strongPenalty;
+                                long tokenId = generateTokens[rIdx];
+                                if (tokenId == stopSpeechToken) continue;
+                                if (tokenId >= 0 && tokenId < vocabSize)
+                                {
+                                    logits[tokenId] -= penValue * 2.0f;
+                                }
                             }
                         }
 
                         if (generateTokens.Count >= 16)
                         {
-                            bool loopDetected = false;
-                            int checkCount = Math.Min(generateTokens.Count, 48);
-                            var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
-                            for (int patLen = 1; patLen <= 8 && !loopDetected; patLen++)
+                            int minSpeechStepsCheck = (int)(inputIds.Length * 1.8f) + 10;
+                            if (step >= minSpeechStepsCheck)
                             {
-                                if (recent.Length < patLen * 3) continue;
-                                var tail = recent.Skip(recent.Length - patLen).ToArray();
-                                int matchCount = 1;
-                                for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
+                                bool loopDetected = false;
+                                int checkCount = Math.Min(generateTokens.Count, 48);
+                                var recent = generateTokens.Skip(generateTokens.Count - checkCount).ToArray();
+                                for (int patLen = 4; patLen <= 8 && !loopDetected; patLen++)
                                 {
-                                    bool match = true;
-                                    for (int k = 0; k < patLen; k++)
+                                    if (recent.Length < patLen * 3) continue;
+                                    var tail = recent.Skip(recent.Length - patLen).ToArray();
+                                    int matchCount = 1;
+                                    for (int pos = 0; pos <= recent.Length - patLen - patLen; pos++)
                                     {
-                                        if (recent[pos + k] != tail[k]) { match = false; break; }
+                                        bool match = true;
+                                        for (int k = 0; k < patLen; k++)
+                                        {
+                                            if (recent[pos + k] != tail[k]) { match = false; break; }
+                                        }
+                                        if (match) matchCount++;
                                     }
-                                    if (match) matchCount++;
+                                    if (matchCount >= 3)
+                                    {
+                                        Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
+                                        loopDetected = true;
+                                    }
                                 }
-                                // 短いパターン（1〜2トークン）は3回繰り返し、長いパターンは2〜3回繰り返しでループ判定
-                                int requiredMatches = patLen <= 2 ? 3 : 2;
-                                if (matchCount >= requiredMatches)
-                                {
-                                    Log($"[ループ検出] パターン長={patLen} が {matchCount} 回繰り返されました。強制終了します。(ステップ={step})");
-                                    loopDetected = true;
-                                }
+                                if (loopDetected) break;
                             }
-                            if (loopDetected) break;
                         }
 
                         float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
