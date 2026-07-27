@@ -1293,8 +1293,8 @@ namespace CBoxTTS.Native
                     lineText = EnglishNormalizer.Normalize(rawLine);
                 }
 
-                // 1文単位で分割。英語で120文字を超える長文の場合のみカンマ等の読点でも節分割
-                bool needCommaSplit = isEnglish && lineText.Length > 120;
+                // 英語ではカンマ(,)での分断を行わず、フルセンテンス単位で処理して途切れや文脈損失を阻止
+                bool needCommaSplit = false;
                 var split = SplitSentences(lineText, needCommaSplit);
                 sentences.AddRange(split);
             }
