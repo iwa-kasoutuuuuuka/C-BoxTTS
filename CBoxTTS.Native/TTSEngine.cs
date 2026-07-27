@@ -893,7 +893,7 @@ namespace CBoxTTS.Native
 
                             float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                             long nextToken;
-                            int minSpeechStepsCuda = Math.Min(15, (int)(inputIds.Length * 0.5f));
+                            int minSpeechStepsCuda = Math.Max(25, (int)(inputIds.Length * 0.95f));
                             int topTokenIdCuda = 0;
                             float maxLogitCuda = logits[0];
                             for (int v = 1; v < logits.Length; v++)
@@ -901,10 +901,10 @@ namespace CBoxTTS.Native
                                 if (logits[v] > maxLogitCuda) { maxLogitCuda = logits[v]; topTokenIdCuda = v; }
                             }
 
-                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 0.5f))
+                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 1.2f))
                             {
                                 nextToken = stopSpeechToken;
-                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step}, EOS Logit={eosLogitValCuda:F2}, TopToken={topTokenIdCuda})。正常終了します。");
+                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2}, TopToken={topTokenIdCuda})。正常終了します。");
                             }
                             else
                             {
@@ -1153,7 +1153,7 @@ namespace CBoxTTS.Native
 
                         float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                         long nextToken;
-                        int minSpeechSteps = Math.Min(15, (int)(inputIds.Length * 0.5f));
+                        int minSpeechSteps = Math.Max(25, (int)(inputIds.Length * 0.95f));
                         int topTokenId = 0;
                         float maxLogit = logits[0];
                         for (int v = 1; v < logits.Length; v++)
@@ -1161,10 +1161,10 @@ namespace CBoxTTS.Native
                             if (logits[v] > maxLogit) { maxLogit = logits[v]; topTokenId = v; }
                         }
 
-                        if (step >= minSpeechSteps && (topTokenId == stopSpeechToken || eosLogitVal > 0.5f))
+                        if (step >= minSpeechSteps && (topTokenId == stopSpeechToken || eosLogitVal > 1.2f))
                         {
                             nextToken = stopSpeechToken;
-                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step}, EOS Logit={eosLogitVal:F2}, TopToken={topTokenId})。正常終了します。");
+                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechSteps}, EOS Logit={eosLogitVal:F2}, TopToken={topTokenId})。正常終了します。");
                         }
                         else
                         {
@@ -1391,9 +1391,27 @@ namespace CBoxTTS.Native
                 var sentenceIds = tokenizer.Encode(processedText, langToken);
                 var wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, temperature, cfgWeight, repetitionPenalty);
                 
+                // 英文の場合の完全性自動チェック機能 (Speech Validation Check & Auto-Retry)
+                if (langToken == 1 && sentenceIds.Length >= 5)
+                {
+                    int wordCount = sentence.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                    int minExpectedSamples = Math.Max(9600, (int)(wordCount * 3600 * 0.6f)); // 1単語あたり最低 0.15秒以上の音声を要求
+                    int retryCount = 0;
+                    while ((wav == null || wav.Length < minExpectedSamples) && retryCount < 2)
+                    {
+                        retryCount++;
+                        Log($"[完全性検証警告] チャンク {i+1} の出力音声({wav?.Length ?? 0}サンプル ≒ {((wav?.Length ?? 0)/24000.0):F2}秒) がテキスト量({wordCount}語)に対する最小必要長({minExpectedSamples}サンプル)未満です。途切れと判定し、自動再生成({retryCount}/2)を実行します。");
+                        float retryTemp = Math.Min(1.0f, temperature + 0.05f * retryCount);
+                        wav = await GenerateAsync(sentenceIds, voicePath, exaggeration, retryTemp, cfgWeight, repetitionPenalty);
+                    }
+                    if (wav != null && wav.Length >= minExpectedSamples)
+                    {
+                        Log($"[完全性検証合格] チャンク {i+1}: 正確な長さ({wav.Length}サンプル ≒ {(wav.Length/24000.0):F2}秒, {wordCount}語) の音声を検証・出力完了。");
+                    }
+                }
+
                 if (wav != null && wav.Length > 0)
                 {
-                    // GenerateAsync内でTrimSilence適用済み。ここでの二重適用は先頭音声を誤削除する原因となるため行わない。
                     allWavChunks.Add(wav);
                 }
                 else
