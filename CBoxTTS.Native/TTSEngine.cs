@@ -242,11 +242,7 @@ namespace CBoxTTS.Native
                         path = Path.Combine(AppContext.BaseDirectory, "models", GetModelSubDir(type), baseName);
                     }
                     
-                    // ONNXモデルをロードする前に、GQA（GroupQueryAttention）の入力数パッチを自動適用
-                    if (File.Exists(path) && baseName.StartsWith("language_model") && baseName.EndsWith(".onnx"))
-                    {
-                        OnnxGqaPatcher.PatchModel(path);
-                    }
+                    // Note: ONNX GQA patching is disabled as English language_model.onnx is already clean.
                     
                     Log($"[Session開始] {baseName} (Path: {path})");
                     
@@ -257,7 +253,6 @@ namespace CBoxTTS.Native
                         try
                         {
                             var options = new SessionOptions();
-                            options.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
 #if USE_CUDA
                             try
                             {
@@ -285,9 +280,9 @@ namespace CBoxTTS.Native
                             {
                                 Log($"[CUDA初期化失敗、CPUにフォールバックします] {baseName}: {cudaEx.Message}");
                                 options.Dispose();
-                                 var cpuOptions = new SessionOptions();
-                                cpuOptions.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
+                                var cpuOptions = new SessionOptions();
                                 cpuOptions.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                                cpuOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
                                 session = new InferenceSession(path, cpuOptions);
                                 detectedBackend = "CPU (Fallback)";
                                 Log($"[Session成功:CPU (CUDAフォールバック)] {baseName}");
@@ -304,10 +299,10 @@ namespace CBoxTTS.Native
                             {
                                 Log($"[DirectML初期化失敗、CPUにフォールバックします] {baseName}: {dmlEx.Message}");
                                 options.Dispose();
-                                options = new SessionOptions();
-                                options.AddSessionConfigEntry("session.disable_precision_free_cast", "1");
-                                options.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
-                                session = new InferenceSession(path, options);
+                                var cpuOptions = new SessionOptions();
+                                cpuOptions.IntraOpNumThreads = Math.Min(4, Environment.ProcessorCount);
+                                cpuOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
+                                session = new InferenceSession(path, cpuOptions);
                                 detectedBackend = "CPU (Fallback)";
                                 Log($"[Session成功:CPU (DirectMLフォールバック)] {baseName}");
                             }
