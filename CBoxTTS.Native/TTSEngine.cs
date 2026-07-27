@@ -1238,7 +1238,7 @@ namespace CBoxTTS.Native
                 Log($"デコーダー出力: 先頭0.1秒の最大振幅 = {diagMaxAbs:F4}（0に近い場合は先頭が無音）");
 
                 // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す (閾値0.003fで語尾を保護)
-                wavData = TrimSilence(wavData, 0.003f, 2400, 4800);
+                wavData = TrimSilence(wavData, 0.003f, 4800, 4800);
 
                 return wavData;
             });
@@ -1557,7 +1557,16 @@ namespace CBoxTTS.Native
             }
 
             // トリム前後にマージンを持たせる。先頭側と末尾側に個別マージンを適用。
-            startIdx = Math.Max(0, startIdx - startMargin);
+            // セーフガード: 先頭の有音が0.3秒(7200サンプル)以内にある場合は先頭トリムをスキップ
+            // （先頭の子音・破裂音は振幅が小さく、マージンだけでは保護しきれないため）
+            if (startIdx <= 7200)
+            {
+                startIdx = 0; // 先頭は切らない
+            }
+            else
+            {
+                startIdx = Math.Max(0, startIdx - startMargin);
+            }
             endIdx = Math.Min(audio.Length - 1, endIdx + endMargin);
 
             int trimmedLength = endIdx - startIdx + 1;
