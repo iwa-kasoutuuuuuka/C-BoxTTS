@@ -1143,25 +1143,17 @@ namespace CBoxTTS.Native
                             }
                         }
 
-                        float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
-                        long nextToken;
-                        int minSpeechSteps = Math.Max(25, (int)(inputIds.Length * 0.95f));
-                        int topTokenId = 0;
-                        float maxLogit = logits[0];
-                        for (int v = 1; v < logits.Length; v++)
+                        // カンマや息継ぎポーズでの途中打ち切りを物理的に防止する最小必須ステップ
+                        int minSpeechSteps = Math.Max(15, (int)(inputIds.Length * 1.2f));
+
+                        // 最小ステップ数に達するまでは、サンプリングによる偶発的な EOS 選択を物理的に遮断
+                        if (step < minSpeechSteps && stopSpeechToken >= 0 && stopSpeechToken < logits.Length)
                         {
-                            if (logits[v] > maxLogit) { maxLogit = logits[v]; topTokenId = v; }
+                            logits[(int)stopSpeechToken] = -9999.0f;
                         }
 
-                        if (step >= minSpeechSteps && (topTokenId == stopSpeechToken || eosLogitVal > 1.2f))
-                        {
-                            nextToken = stopSpeechToken;
-                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechSteps}, EOS Logit={eosLogitVal:F2}, TopToken={topTokenId})。正常終了します。");
-                        }
-                        else
-                        {
-                            nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
-                        }
+                        // モデルの自然な確率分布からサンプリング (強制的スマートEOS上書きは排除)
+                        long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
                         generateTokens.Add(nextToken);
 
                         float eosLogit = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
