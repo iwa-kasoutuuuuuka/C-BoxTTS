@@ -891,8 +891,8 @@ namespace CBoxTTS.Native
                                 }
                             }
 
-                            // テキストを最後まで読みきるに必要な最小ステップ数 (1トークン当たり約 1.6 ステップ)
-                            int minSpeechStepsCuda = Math.Max(20, (int)(inputIds.Length * 1.5f));
+                            // カンマや息継ぎポーズでの途中打ち切りを物理的に防止する最小必須ステップ
+                            int minSpeechStepsCuda = Math.Max(15, (int)(inputIds.Length * 1.2f));
 
                             // 最小ステップ数に達するまでは、サンプリングによる偶発的な EOS 選択および誤終了を物理的に遮断 (-9999f に封印)
                             if (step < minSpeechStepsCuda && stopSpeechToken >= 0 && stopSpeechToken < logits.Length)
@@ -900,29 +900,13 @@ namespace CBoxTTS.Native
                                 logits[(int)stopSpeechToken] = -9999.0f;
                             }
 
-                            float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
-                            long nextToken;
-                            int topTokenIdCuda = 0;
-                            float maxLogitCuda = logits[0];
-                            for (int v = 1; v < logits.Length; v++)
-                            {
-                                if (logits[v] > maxLogitCuda) { maxLogitCuda = logits[v]; topTokenIdCuda = v; }
-                            }
-
-                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 0.8f))
-                            {
-                                nextToken = stopSpeechToken;
-                                Log($"[スマートEOS発動] 文末発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2})。正常終了します。");
-                            }
-                            else
-                            {
-                                nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
-                            }
+                            // モデルの自然な確率分布からサンプリング (カンマやポーズでの強制的スマートEOS上書きは排除)
+                            long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
                             generateTokens.Add(nextToken);
 
                             if (nextToken == stopSpeechToken)
                             {
-                                Log($"終了トークン({stopSpeechToken})を検出しました。ステップ: {step}");
+                                Log($"[文末判定検出] モデルが自律的に終了トークン({stopSpeechToken})を出力しました。ステップ: {step}");
                                 break;
                             }
 
