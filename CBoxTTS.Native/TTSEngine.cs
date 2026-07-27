@@ -590,7 +590,7 @@ namespace CBoxTTS.Native
 
                 // 入力テキスト長（トークン数）に応じた動的な最大トークン制限
                 // (英文の実効発声速度: 1テキストトークンあたり約 3.0〜3.2 音声トークン。余裕を持って inputIds.Length * 3.2 + 35 を設定し、無音後のハルシネーションを物理遮断)
-                int dynamicMaxTokens = Math.Min(450, Math.Max(50, (int)Math.Ceiling(inputIds.Length * 3.2f) + 35));
+                int dynamicMaxTokens = Math.Min(600, Math.Max(60, (int)Math.Ceiling(inputIds.Length * 4.0f) + 60));
                 int maxNewTokens = dynamicMaxTokens;
                 Log($"自己回帰ループ開始... (入力トークン数={inputIds.Length}, 動的最大トークン上限={maxNewTokens})");
 
@@ -1245,8 +1245,8 @@ namespace CBoxTTS.Native
                 float diagMaxAbs = diagLen > 0 ? Enumerable.Range(0, diagLen).Max(j => Math.Abs(wavData[j])) : 0f;
                 Log($"デコーダー出力: 先頭0.1秒の最大振幅 = {diagMaxAbs:F4}（0に近い場合は先頭が無音）");
 
-                // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す
-                wavData = TrimSilence(wavData, 0.018f);
+                // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す (閾値0.003fで語尾を保護)
+                wavData = TrimSilence(wavData, 0.003f, 2400, 4800);
 
                 return wavData;
             });
@@ -1538,7 +1538,7 @@ namespace CBoxTTS.Native
         /// <param name="threshold">無音判定しきい値（振幅の絶対値）</param>
         /// <param name="startMargin">先頭側に残すマージン（サンプル数）。生成音声は2400（100ms）推奨。ref音声は960（40ms）推奨。</param>
         /// <param name="endMargin">末尾側に残すマージン（サンプル数）</param>
-        private float[] TrimSilence(float[] audio, float threshold = 0.018f, int startMargin = 2400, int endMargin = 960)
+        private float[] TrimSilence(float[] audio, float threshold = 0.003f, int startMargin = 2400, int endMargin = 4800)
         {
             if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
 
