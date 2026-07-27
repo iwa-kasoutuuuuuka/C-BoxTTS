@@ -179,6 +179,9 @@ namespace CBoxTTS.Native
                 text = item.Regex.Replace(text, item.Value);
             }
 
+            // 0. 特殊頭字語 (AI) の確実な発音正規化 ("AI" -> "A. I.")
+            text = Regex.Replace(text, @"\bAI\b", "A. I.");
+
             // 0. URL・メールアドレスの除去
             text = UrlRegex.Replace(text, "");
             text = EmailRegex.Replace(text, "");

@@ -893,11 +893,18 @@ namespace CBoxTTS.Native
 
                             float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                             long nextToken;
-                            int minSpeechStepsCuda = (int)(inputIds.Length * 1.8f) + 10;
-                            if (step >= minSpeechStepsCuda && eosLogitValCuda > 1.8f)
+                            int minSpeechStepsCuda = Math.Min(15, (int)(inputIds.Length * 0.5f));
+                            int topTokenIdCuda = 0;
+                            float maxLogitCuda = logits[0];
+                            for (int v = 1; v < logits.Length; v++)
+                            {
+                                if (logits[v] > maxLogitCuda) { maxLogitCuda = logits[v]; topTokenIdCuda = v; }
+                            }
+
+                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 0.5f))
                             {
                                 nextToken = stopSpeechToken;
-                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2})。正常終了します。");
+                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step}, EOS Logit={eosLogitValCuda:F2}, TopToken={topTokenIdCuda})。正常終了します。");
                             }
                             else
                             {
@@ -1146,11 +1153,18 @@ namespace CBoxTTS.Native
 
                         float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                         long nextToken;
-                        int minSpeechSteps = (int)(inputIds.Length * 1.8f) + 10;
-                        if (step >= minSpeechSteps && eosLogitVal > 1.8f)
+                        int minSpeechSteps = Math.Min(15, (int)(inputIds.Length * 0.5f));
+                        int topTokenId = 0;
+                        float maxLogit = logits[0];
+                        for (int v = 1; v < logits.Length; v++)
+                        {
+                            if (logits[v] > maxLogit) { maxLogit = logits[v]; topTokenId = v; }
+                        }
+
+                        if (step >= minSpeechSteps && (topTokenId == stopSpeechToken || eosLogitVal > 0.5f))
                         {
                             nextToken = stopSpeechToken;
-                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechSteps}, EOS Logit={eosLogitVal:F2})。正常終了します。");
+                            Log($"[スマートEOS発動] 発声完了を検出(ステップ={step}, EOS Logit={eosLogitVal:F2}, TopToken={topTokenId})。正常終了します。");
                         }
                         else
                         {
