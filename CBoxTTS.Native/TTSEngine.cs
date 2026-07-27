@@ -490,7 +490,7 @@ namespace CBoxTTS.Native
                 var positionIds = new long[inputIdsLong.Length];
                 for (int i = 0; i < inputIdsLong.Length; i++)
                 {
-                    positionIds[i] = inputIdsLong[i] >= startSpeechToken ? 0 : Math.Max(0L, (long)(i - 1));
+                    positionIds[i] = (long)i;
                 }
                 var positionIdsTensor = new DenseTensor<long>(positionIds, new[] { 1, positionIds.Length });
                 var exaggerationTensor = new DenseTensor<float>(new[] { exaggeration }, new[] { 1 });
