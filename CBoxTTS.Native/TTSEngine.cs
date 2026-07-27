@@ -843,9 +843,7 @@ namespace CBoxTTS.Native
                             }
 
                             // ----------------- 3. ペナルティの適用とサンプリング -----------------
-                            // ペナルティは「直近 4 トークン」以内の短い即時重複（スタック・ループ）にのみマイナス補正
-                            float penValue = repetitionPenalty - 1.0f;
-                            if (penValue > 0.001f)
+                            if (repetitionPenalty > 1.001f)
                             {
                                 const int recentWindow = 4;
                                 int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
@@ -855,7 +853,8 @@ namespace CBoxTTS.Native
                                     if (tokenId == stopSpeechToken) continue;
                                     if (tokenId >= 0 && tokenId < vocabSize)
                                     {
-                                        logits[tokenId] -= penValue * 2.0f;
+                                        if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
+                                        else logits[tokenId] /= repetitionPenalty;
                                     }
                                 }
                             }
@@ -1097,8 +1096,7 @@ namespace CBoxTTS.Native
                         }
 
                         // ----------------- 3. ペナルティの適用とサンプリング -----------------
-                        float penValue = repetitionPenalty - 1.0f;
-                        if (penValue > 0.001f)
+                        if (repetitionPenalty > 1.001f)
                         {
                             const int recentWindow = 4;
                             int recentStart = Math.Max(0, generateTokens.Count - recentWindow);
@@ -1108,7 +1106,8 @@ namespace CBoxTTS.Native
                                 if (tokenId == stopSpeechToken) continue;
                                 if (tokenId >= 0 && tokenId < vocabSize)
                                 {
-                                    logits[tokenId] -= penValue * 2.0f;
+                                    if (logits[tokenId] < 0) logits[tokenId] *= repetitionPenalty;
+                                    else logits[tokenId] /= repetitionPenalty;
                                 }
                             }
                         }
