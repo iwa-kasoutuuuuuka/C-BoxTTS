@@ -891,9 +891,17 @@ namespace CBoxTTS.Native
                                 }
                             }
 
+                            // テキストを最後まで読みきるに必要な最小ステップ数 (1トークン当たり約 1.6 ステップ)
+                            int minSpeechStepsCuda = Math.Max(20, (int)(inputIds.Length * 1.5f));
+
+                            // 最小ステップ数に達するまでは、サンプリングによる偶発的な EOS 選択および誤終了を物理的に遮断 (-9999f に封印)
+                            if (step < minSpeechStepsCuda && stopSpeechToken >= 0 && stopSpeechToken < logits.Length)
+                            {
+                                logits[(int)stopSpeechToken] = -9999.0f;
+                            }
+
                             float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
                             long nextToken;
-                            int minSpeechStepsCuda = Math.Max(25, (int)(inputIds.Length * 0.95f));
                             int topTokenIdCuda = 0;
                             float maxLogitCuda = logits[0];
                             for (int v = 1; v < logits.Length; v++)
@@ -901,10 +909,10 @@ namespace CBoxTTS.Native
                                 if (logits[v] > maxLogitCuda) { maxLogitCuda = logits[v]; topTokenIdCuda = v; }
                             }
 
-                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 1.2f))
+                            if (step >= minSpeechStepsCuda && (topTokenIdCuda == stopSpeechToken || eosLogitValCuda > 0.8f))
                             {
                                 nextToken = stopSpeechToken;
-                                Log($"[スマートEOS発動] 発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2}, TopToken={topTokenIdCuda})。正常終了します。");
+                                Log($"[スマートEOS発動] 文末発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2})。正常終了します。");
                             }
                             else
                             {
@@ -1395,7 +1403,8 @@ namespace CBoxTTS.Native
                 if (langToken == 1 && sentenceIds.Length >= 5)
                 {
                     int wordCount = sentence.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
-                    int minExpectedSamples = Math.Max(9600, (int)(wordCount * 3600 * 0.6f)); // 1単語あたり最低 0.15秒以上の音声を要求
+                    // 1単語当たり最低 0.28 秒以上（7000サンプル）の長さを厳格検証
+                    int minExpectedSamples = Math.Max(12000, (int)(wordCount * 7000 * 0.8f));
                     int retryCount = 0;
                     while ((wav == null || wav.Length < minExpectedSamples) && retryCount < 2)
                     {
