@@ -307,7 +307,7 @@ namespace CBoxTTS.Native
                 // 2. 視覚システム名 (DeVIEW / DView / D-View -> deview)
                 lower = Regex.Replace(lower, @"\bdview\b|\bd\s*view\b|\bdevue\b|\bdee\s*view\b|\bde\s*view\b|\bd\b", "deview");
                 // 3. AI 表記同値化 (AI / IE / AIE / AE / AA / II / A.I. / Ey Eye / .i / a e / III / AIII -> ai)
-                lower = Regex.Replace(lower, @"\baiii\b|\biii\b|\baii\b|\baie\b|\bae\b|\baa\b|\bie\b|\bii\b|\bi\s*e\b|\bay\s*eye\b|\ba\s*i\b|\ba\s*two\b|\ba2\b|\beye\b|\bi\b|\ba\s+e\b|\babi\b", "ai");
+                lower = Regex.Replace(lower, @"\baiii\b|\biii\b|\baii\b|\baie\b|\bae\b|\baa\b|\bie\b|\bii\b|\bi\s*e\b|\bay\s*eye\b|\ba\s*i\b|\ba\s*two\b|\ba2\b|\beye\b|\bi\b|\ba\s+e\b|\babi\b|\bbye-bye\b|\bbye\s+bye\b", "ai");
                 // 4. 一般用語・専門用語の同値化 (sedura / seduter / set up per / sajur / procedutor -> procedure)
                 lower = Regex.Replace(lower, @"\bsedura\b|\bseduter\b|\bsajur\b|\bprocedutor\b|\bset\s+up\s+per\b|\bper\s+seduter\b", "procedure");
                 lower = Regex.Replace(lower, @"\banormaly\b|\ban\s+omeletexion\b", "anomaly");
