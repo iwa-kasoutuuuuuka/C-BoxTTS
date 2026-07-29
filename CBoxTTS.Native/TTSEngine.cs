@@ -459,8 +459,8 @@ namespace CBoxTTS.Native
                 Log($"参照音声ロード完了: {refAudio.Length} サンプル ({(double)refAudio.Length / 24000:F2}秒)");
 
                 // 1b. 参照音声の前処理（無音トリム + 音量正規化 + 10秒制限）
-                // ref音声は先頭マージン960（40ms）でタイトにトリム。生成音声とは別マージンを使用する。
-                refAudio = TrimSilence(refAudio, 0.01f, startMargin: 960, endMargin: 960);
+                // ref音声は先頭マージン960（40ms）でタイトにトリム。先頭リップノイズカット(isRefAudio: true)を適用。
+                refAudio = TrimSilence(refAudio, 0.015f, startMargin: 960, endMargin: 960, isRefAudio: true);
                 refAudio = NormalizeAudioVolume(refAudio);
                 const int maxRefSamples = 24000 * 10; // 10秒制限
                 if (refAudio.Length > maxRefSamples)
@@ -1602,7 +1602,7 @@ namespace CBoxTTS.Native
         /// <param name="threshold">無音判定しきい値（振幅の絶対値）</param>
         /// <param name="startMargin">先頭側に残すマージン（サンプル数）。生成音声は2400（100ms）推奨。ref音声は960（40ms）推奨。</param>
         /// <param name="endMargin">末尾側に残すマージン（サンプル数）</param>
-        private float[] TrimSilence(float[] audio, float threshold = 0.003f, int startMargin = 2400, int endMargin = 4800)
+        private float[] TrimSilence(float[] audio, float threshold = 0.003f, int startMargin = 2400, int endMargin = 4800, bool isRefAudio = false)
         {
             if (audio == null || audio.Length == 0) return audio ?? Array.Empty<float>();
 
@@ -1629,11 +1629,11 @@ namespace CBoxTTS.Native
             }
 
             // トリム前後にマージンを持たせる。先頭側と末尾側に個別マージンを適用。
-            // セーフガード: 先頭の有音が0.6秒(14400サンプル)以内にある場合は先頭トリムをスキップ
-            // （先頭の子音・破裂音・機能語(In, The, A等)は振幅が小さく、マージンだけでは保護しきれないため）
-            if (startIdx <= 14400)
+            // セーフガード: 生成音声で先頭の有音が0.6秒(14400サンプル)以内にある場合は先頭トリムをスキップ
+            // （参照音声以外の場合）
+            if (!isRefAudio && startIdx <= 14400)
             {
-                startIdx = 0; // 先頭は切らない
+                startIdx = 0; // 生成音声の先頭は切らない
             }
             else
             {
