@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -1304,6 +1305,18 @@ namespace CBoxTTS.Native
             
             bool isEnglish = (langToken == 708 || langToken == 1);
 
+            // 「AI」の読み（「アイ」と誤認識されたり「エイ」が頭切れして聞き取りづらくなる不具合）を防止
+            // 日本語環境では「AI」「Ai」「ai」「ＡＩ」等をあらかじめ「エイアイ」に明確化置換
+            if (!isEnglish && !string.IsNullOrEmpty(fullText))
+            {
+                fullText = Regex.Replace(fullText, @"\bAI\b", "エイアイ");
+                fullText = Regex.Replace(fullText, @"\bAi\b", "エイアイ");
+                fullText = Regex.Replace(fullText, @"\bai\b", "エイアイ");
+                fullText = Regex.Replace(fullText, @"ＡＩ", "エイアイ");
+                fullText = Regex.Replace(fullText, @"Ａｉ", "エイアイ");
+                fullText = Regex.Replace(fullText, @"ａｉ", "エイアイ");
+            }
+
             // 入力テキストを改行単位で事前分割し、行構造を保持
             var rawLines = fullText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
                                    .Select(l => l.Trim())
@@ -1374,7 +1387,8 @@ namespace CBoxTTS.Native
                 string processedText = targetSentence;
                 if (langToken == 723) // 日本語
                 {
-                    var analysis = morph.Analyze(targetSentence);
+                    string targetText = Regex.Replace(targetSentence, @"\bAI\b|\bAi\b|\bai\b|ＡＩ|Ａｉ|ａｉ", "エイアイ");
+                    var analysis = morph.Analyze(targetText);
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 var ids = tokenizer.Encode(processedText, langToken);
@@ -1411,7 +1425,8 @@ namespace CBoxTTS.Native
                 string processedText = sentence;
                 if (langToken == 723) // 日本語
                 {
-                    var analysis = morph.Analyze(sentence);
+                    string textForMorph = Regex.Replace(sentence, @"\bAI\b|\bAi\b|\bai\b|ＡＩ|Ａｉ|ａｉ", "エイアイ");
+                    var analysis = morph.Analyze(textForMorph);
                     processedText = string.Concat(analysis.Select(a => a.Reading));
                 }
                 
