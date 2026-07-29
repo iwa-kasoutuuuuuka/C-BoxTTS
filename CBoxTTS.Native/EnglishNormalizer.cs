@@ -226,6 +226,14 @@ namespace CBoxTTS.Native
                 return string.Join(" ", spelled);
             });
 
+            // 0a. 記号直後にスペースがない場合の補正 (Finally,the -> Finally, the / AI,which -> AI, which)
+            text = Regex.Replace(text, @"([a-zA-Z0-9]),([a-zA-Z])", "$1, $2");
+            text = Regex.Replace(text, @"([a-zA-Z0-9]);([a-zA-Z])", "$1; $2");
+            text = Regex.Replace(text, @"([a-zA-Z0-9]):([a-zA-Z])", "$1: $2");
+
+            // 0b. スペルタイポの自動補正 (Anormaly -> Anomaly)
+            text = Regex.Replace(text, @"\bAnormaly\b", "Anomaly", RegexOptions.IgnoreCase);
+
             // 1. 略語の展開 (プリコンパイル済み正規表現の利用)
             foreach (var item in CompiledAbbreviations)
             {

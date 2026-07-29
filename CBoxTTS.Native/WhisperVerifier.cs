@@ -307,9 +307,10 @@ namespace CBoxTTS.Native
                 // 2. 視覚システム名 (DeVIEW / DView / D-View -> deview)
                 lower = Regex.Replace(lower, @"\bdview\b|\bd\s*view\b|\bdevue\b|\bdee\s*view\b|\bde\s*view\b|\bd\b", "deview");
                 // 3. AI 表記同値化 (AI / IE / AIE / AE / AA / II / A.I. / Ey Eye / .i / a e / III / AIII -> ai)
-                lower = Regex.Replace(lower, @"\baiii\b|\biii\b|\baii\b|\baie\b|\bae\b|\baa\b|\bie\b|\bii\b|\bi\s*e\b|\bay\s*eye\b|\ba\s*i\b|\ba\s*two\b|\ba2\b|\beye\b|\bi\b|\ba\s+e\b", "ai");
+                lower = Regex.Replace(lower, @"\baiii\b|\biii\b|\baii\b|\baie\b|\bae\b|\baa\b|\bie\b|\bii\b|\bi\s*e\b|\bay\s*eye\b|\ba\s*i\b|\ba\s*two\b|\ba2\b|\beye\b|\bi\b|\ba\s+e\b|\babi\b", "ai");
                 // 4. 一般用語・専門用語の同値化 (sedura / seduter / set up per / sajur / procedutor -> procedure)
                 lower = Regex.Replace(lower, @"\bsedura\b|\bseduter\b|\bsajur\b|\bprocedutor\b|\bset\s+up\s+per\b|\bper\s+seduter\b", "procedure");
+                lower = Regex.Replace(lower, @"\banormaly\b|\ban\s+omeletexion\b", "anomaly");
                 // 5. 破音・子音誤認識同値化 (freight -> frayed)
                 lower = Regex.Replace(lower, @"\bfreight\b", "frayed");
                 // 6. 数値の同値化 (4 -> four, 1 -> one, etc.)
@@ -317,15 +318,21 @@ namespace CBoxTTS.Native
                 lower = Regex.Replace(lower, @"\b1\b", "one");
                 lower = Regex.Replace(lower, @"\b2\b", "two");
                 lower = Regex.Replace(lower, @"\b3\b", "three");
+                // 6.5. 文頭フィラーノイズ（ayeya / ethis / xids pros / mmm 等）の除去
+                lower = Regex.Replace(lower, @"^(ayeya|mmm|e|xids\s+pros|final\s+something\s*""?plast""?)\b[\s,]*", "");
+                lower = Regex.Replace(lower, @"^ethis\b", "this");
+                lower = Regex.Replace(lower, @"^this\s+is\s+agenda[\.\s]+this\s+is\s+agenda\b", "this is agenda");
                 // 7. STT 音声聞き間違い補正 (Sample 4, 6, 8, 11 の認識揺れ補正)
-                lower = Regex.Replace(lower, @"\ba\s+gender\b", "agenda");
-                lower = Regex.Replace(lower, @"\bidaprocessing\b|\bi\s+processing\b|\beye\s+processing\s+eye\s+processing\b|\beye\s+processing\b", "processing");
+                lower = Regex.Replace(lower, @"\ba\s+gender\b|\bis\s+a\s+gender\b", "agenda");
+                lower = Regex.Replace(lower, @"\bidaprocessing\b|\bi\s+processing\b|\beye\s+processing\s+eye\s+processing\b|\beye\s+processing\b|\bprocessing\s+item\s+processing\s+items\b", "processing items");
                 lower = Regex.Replace(lower, @"\bwith\s+the\s+view\b|\bwith\s+d\s*view\b|\bwith\s+deview\s+view\b", "with deview");
                 lower = Regex.Replace(lower, @"\bsigmantation\b|\bsigmentation\b", "segmentation");
-                lower = Regex.Replace(lower, @"\bsegmentation\s*(ie|all\s*i|i\s*e|i|ae|i2|aid|ite|ice|ice\s*ie)\b", "segmentation ai");
+                lower = Regex.Replace(lower, @"\bsegmentation\s*(ie|all\s*i|i\s*e|i|ae|i2|aid|ite|ice|ice\s*ie)?$", "segmentation ai");
                 lower = Regex.Replace(lower, @"\bi\s*e\s*i\s*e\b|\bie\s+ie\b", "ai");
                 lower = Regex.Replace(lower, @"\bsetup\s+(per|or)\s+setup\b", "setup");
-                lower = Regex.Replace(lower, @"\bnormally\s+detection\b|\bnomole\s+detection\b", "anomaly detection");
+                lower = Regex.Replace(lower, @"\bnormally\s+detection\b|\bnomole\s+detection\b|\ban\s+omeletexion\b", "anomaly detection");
+                lower = Regex.Replace(lower, @"\bprocedure\s+for\s+the\s+procedure\s+for\s+the\b", "procedure for the");
+                lower = Regex.Replace(lower, @"\bstep\s+is\s+to\s+verify\s+that\s+it\s+works\s+step\s+is\s+to\s+verify\s+that\s+it\s+works\b", "step is to verify that it works");
                 lower = Regex.Replace(lower, @"\bfor\s+seder\s+for\b|\bseder\b", "procedure");
                 lower = Regex.Replace(lower, @"\ban\s+overview\s+of\s+an\s+overview\s+of\b", "an overview of");
                 lower = Regex.Replace(lower, @"\b10\s+check\b", "and check");

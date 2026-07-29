@@ -459,8 +459,8 @@ namespace CBoxTTS.Native
                 Log($"参照音声ロード完了: {refAudio.Length} サンプル ({(double)refAudio.Length / 24000:F2}秒)");
 
                 // 1b. 参照音声の前処理（無音トリム + 音量正規化 + 10秒制限）
-                // ref音声は先頭マージン960（40ms）でタイトにトリム。先頭リップノイズカット(isRefAudio: true)を適用。
-                refAudio = TrimSilence(refAudio, 0.015f, startMargin: 960, endMargin: 960, isRefAudio: true);
+                // ref音声は先頭吸気ノイズ・言い淀みを防ぐため厳密な閾値 (0.025f) でタイトにトリム。
+                refAudio = TrimSilence(refAudio, 0.025f, startMargin: 480, endMargin: 960, isRefAudio: true);
                 refAudio = NormalizeAudioVolume(refAudio);
                 const int maxRefSamples = 24000 * 10; // 10秒制限
                 if (refAudio.Length > maxRefSamples)
