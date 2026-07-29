@@ -100,7 +100,7 @@ namespace CBoxTTS.Native
         // 頭字語の例外（そのまま単語として発音する既知の頭字語）
         private static readonly HashSet<string> KnownAcronymsAsWords = new(StringComparer.OrdinalIgnoreCase)
         {
-            "AI", "UI", "API", "ID", "SDK", "ML", "DL", "GPU", "CPU",
+            "UI", "API", "ID", "SDK", "ML", "DL", "GPU", "CPU",
             "NASA", "NATO", "ASAP", "SCUBA", "LASER", "RADAR", "AIDS", "JPEG", "GIF",
             "BIOS", "LAN", "WAN", "RAM", "SIM", "VRAM", "SCADA", "PID"
         };
@@ -182,8 +182,11 @@ namespace CBoxTTS.Native
             // 0. 特殊製品名 (De-VIEW / DeVIEW / Dee-View) の発音正規化 (De-VIEW -> deview)
             text = Regex.Replace(text, @"\bDe-VIEW\b|\bDeVIEW\b|\bDe\s*VIEW\b|\bDee-View\b", "deview", RegexOptions.IgnoreCase);
 
-            // 0. 誤綴り（Anormaly -> Anomaly）の自動補正
-            text = Regex.Replace(text, @"\bAnormaly\b", "Anomaly", RegexOptions.IgnoreCase);
+            // 0. 誤綴り（Anormaly -> anomaly）の自動補正
+            text = Regex.Replace(text, @"\bAnormaly\b", "anomaly", RegexOptions.IgnoreCase);
+
+            // 0. AI 表記の自動正規化 (AI -> A. I. / A.I. -> A. I.)
+            text = Regex.Replace(text, @"\bAI\b|\bA\.I\.\b", "A. I.");
 
             // 0. 不要なダブルクォーテーション記号のサニタイズ（モデルの誤読・余分な単語リピート防止）
             text = Regex.Replace(text, @"[""“”]", "");
