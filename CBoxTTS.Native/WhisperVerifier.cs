@@ -24,6 +24,14 @@ namespace CBoxTTS.Native
         public double AudioDurationSeconds { get; set; }
     }
 
+    public class DebugBatchItem
+    {
+        public int LineIndex { get; set; }
+        public string OriginalText { get; set; } = "";
+        public string WavPath { get; set; } = "";
+        public float[] PcmWav24kHz { get; set; } = Array.Empty<float>();
+    }
+
     public class WhisperVerifier : IDisposable
     {
         private readonly string _baseDir;
@@ -205,6 +213,84 @@ namespace CBoxTTS.Native
             }
 
             return result;
+        }
+
+        public async Task GenerateBatchDebugTextFileAsync(string baseWavPath, List<DebugBatchItem> items, string langCode = "ja", Action<string, float>? progressCallback = null)
+        {
+            if (items == null || items.Count == 0) return;
+
+            string whisperLang = (langCode == "ja" || langCode == "Japanese" || langCode == "723") ? "ja" : "en";
+            string debugFilePath = baseWavPath + ".debug.txt";
+
+            var results = new List<AutoDebugResult>();
+            double totalMatchPct = 0;
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                progressCallback?.Invoke($"デバッグ文字起こし検証中 ({i + 1}/{items.Count})...", (float)(i + 1) / items.Count * 100f);
+
+                string transcribedText = await TranscribeAudioAsync(item.PcmWav24kHz, whisperLang);
+                var res = new AutoDebugResult
+                {
+                    OriginalText = item.OriginalText,
+                    TranscribedText = transcribedText,
+                    AudioWavPath = item.WavPath,
+                    AudioDurationSeconds = item.PcmWav24kHz.Length / 24000.0
+                };
+                AnalyzeDifference(item.OriginalText, transcribedText, res);
+                results.Add(res);
+                totalMatchPct += res.MatchPercentage;
+            }
+
+            double avgMatchPct = results.Count > 0 ? Math.Round(totalMatchPct / results.Count, 2) : 0;
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("==================================================");
+                sb.AppendLine("C-Box TTS Debug STT Verification Batch Summary Log");
+                sb.AppendLine($"Date: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"Base Save File: {baseWavPath}");
+                sb.AppendLine($"Total Lines / WAVs: {items.Count}");
+                sb.AppendLine($"Overall Average Match Percentage: {avgMatchPct:F2}%");
+                sb.AppendLine($"Language Setting: {langCode} (STT: {whisperLang})");
+                sb.AppendLine("==================================================");
+                sb.AppendLine();
+
+                for (int i = 0; i < results.Count; i++)
+                {
+                    var res = results[i];
+
+                    sb.AppendLine($"[Line {i + 1} / {results.Count}]");
+                    sb.AppendLine($"WAV File: {res.AudioWavPath}");
+                    sb.AppendLine($"Duration: {res.AudioDurationSeconds:F2} sec | Match: {res.MatchPercentage:F2}%");
+                    sb.AppendLine($"- Original Text: {res.OriginalText}");
+                    sb.AppendLine($"- Whisper STT: {(string.IsNullOrWhiteSpace(res.TranscribedText) ? "(音声認識テキストなし / No speech recognized)" : res.TranscribedText)}");
+
+                    if (res.MissingWords.Count > 0)
+                    {
+                        sb.AppendLine($"  Missing: {string.Join(", ", res.MissingWords)}");
+                    }
+                    if (res.ExtraWords.Count > 0)
+                    {
+                        sb.AppendLine($"  Extra: {string.Join(", ", res.ExtraWords)}");
+                    }
+                    if (res.SubstitutedWords.Count > 0)
+                    {
+                        sb.AppendLine($"  Substituted: {string.Join("; ", res.SubstitutedWords)}");
+                    }
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine("==================================================");
+
+                await File.WriteAllTextAsync(debugFilePath, sb.ToString(), System.Text.Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WhisperVerifier] Failed to write batch debug log: {ex.Message}");
+            }
         }
 
         private void AnalyzeDifference(string original, string transcribed, AutoDebugResult result)

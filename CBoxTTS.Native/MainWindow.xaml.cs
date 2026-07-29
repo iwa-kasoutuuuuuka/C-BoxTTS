@@ -809,6 +809,7 @@ namespace CBoxTTS.Native
 
                     long langToken = GetCurrentLangToken();
                     string baseFilePath = sfd.FileName;
+                    var debugItems = new System.Collections.Generic.List<DebugBatchItem>();
 
                     if (lines.Count == 1)
                     {
@@ -823,7 +824,13 @@ namespace CBoxTTS.Native
                                 });
                         });
                         _audio.SaveWav(wav, baseFilePath, speed);
-                        await ProcessDebugSttIfEnabledAsync(lines[0], baseFilePath, wav);
+                        debugItems.Add(new DebugBatchItem
+                        {
+                            LineIndex = 0,
+                            OriginalText = lines[0],
+                            WavPath = baseFilePath,
+                            PcmWav24kHz = wav
+                        });
                     }
                     else
                     {
@@ -861,9 +868,18 @@ namespace CBoxTTS.Native
                                     });
                             });
                             _audio.SaveWav(wav, numberedPath, speed);
-                            await ProcessDebugSttIfEnabledAsync(line, numberedPath, wav);
+                            debugItems.Add(new DebugBatchItem
+                            {
+                                LineIndex = i,
+                                OriginalText = line,
+                                WavPath = numberedPath,
+                                PcmWav24kHz = wav
+                            });
                         }
                     }
+
+                    // 1つにまとめたデバッグ文字起こし検証ログを出力
+                    await ProcessDebugSttBatchIfEnabledAsync(baseFilePath, debugItems);
 
                     StatusText.Text = GetMsg("保存完了", "Save completed");
                     MessageBox.Show(lines.Count == 1 
@@ -898,9 +914,9 @@ namespace CBoxTTS.Native
 #endif
         }
 
-        private async Task ProcessDebugSttIfEnabledAsync(string originalText, string wavPath, float[] pcmWav)
+        private async Task ProcessDebugSttBatchIfEnabledAsync(string baseWavPath, System.Collections.Generic.List<DebugBatchItem> debugItems)
         {
-            if (DebugSttCheckBox.IsChecked != true) return;
+            if (DebugSttCheckBox.IsChecked != true || debugItems == null || debugItems.Count == 0) return;
 
             try
             {
@@ -913,7 +929,10 @@ namespace CBoxTTS.Native
                 });
 
                 string langCode = GetCurrentLangToken() == 723 ? "ja" : "en";
-                await _whisperVerifier.GenerateDebugTextFileAsync(originalText, wavPath, pcmWav, langCode);
+                await _whisperVerifier.GenerateBatchDebugTextFileAsync(baseWavPath, debugItems, langCode, (msg, pct) =>
+                {
+                    Dispatcher.Invoke(() => StatusText.Text = msg);
+                });
             }
             catch (Exception ex)
             {
