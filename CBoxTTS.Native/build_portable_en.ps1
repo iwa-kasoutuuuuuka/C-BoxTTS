@@ -31,9 +31,9 @@ if (Test-Path $fullOutputPath) {
     New-Item -ItemType Directory -Path $fullOutputPath -Force
 }
 
-# Copy all files from publish (EXE, DLLs, etc.)
-Write-Host "Copying binaries and DLLs..."
-Copy-Item -Path "$publishDir\*" -Destination $fullOutputPath -Force
+# Copy all files from publish (EXE, DLLs, runtimes, etc.)
+Write-Host "Copying binaries, DLLs, and runtimes..."
+Copy-Item -Path "$publishDir\*" -Destination $fullOutputPath -Recurse -Force
 
 if ($OnnxBackend -eq "GPU") {
     Write-Host "Copying CUDA/cuDNN/NVRTC DLLs to portable folder..."
@@ -146,7 +146,7 @@ if (Test-Path $sourceAssets) {
 }
 
 # Copy User Dictionary (ユーザー辞書)
-$dictPath = "..\user_dict_en.txt"
+$dictPath = "user_dict_en.txt"
 if (Test-Path $dictPath) {
     Write-Host "Copying English user dictionary..."
     Copy-Item -Path $dictPath -Destination (Join-Path $fullOutputPath "user_dict_en.txt") -Force
@@ -157,6 +157,13 @@ $specPath = "..\ポータブル版仕様書_Native_EN.md"
 if (Test-Path $specPath) {
     Write-Host "Copying English specification..."
     Copy-Item -Path $specPath -Destination (Join-Path $fullOutputPath "ポータブル版仕様書_Native_EN.md") -Force
+}
+
+# Copy Sample Sentences (デバッグ用サンプル文章)
+$sampleSentencesPath = "sample_sentences_en.txt"
+if (Test-Path $sampleSentencesPath) {
+    Write-Host "Copying sample_sentences_en.txt..."
+    Copy-Item -Path $sampleSentencesPath -Destination (Join-Path $fullOutputPath "sample_sentences_en.txt") -Force
 }
 
 Write-Host "--- English Build Finished! ---"

@@ -5,7 +5,8 @@
 # 頭字語のスペルアウト処理（AcronymRegex）より優先されます。
 
 # === 一般的な技術用語 ===
-AI,ay eye
+DeVIEW,deview
+De-VIEW,deview
 ML,em ell
 DL,dee ell
 IoT,eye oh tee

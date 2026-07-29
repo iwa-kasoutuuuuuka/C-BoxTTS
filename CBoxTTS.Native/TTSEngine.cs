@@ -242,7 +242,10 @@ namespace CBoxTTS.Native
                         path = Path.Combine(AppContext.BaseDirectory, "models", GetModelSubDir(type), baseName);
                     }
                     
-                    // Note: ONNX GQA patching is disabled as English language_model.onnx is already clean.
+                    if (baseName.StartsWith("language_model"))
+                    {
+                        OnnxGqaPatcher.PatchModel(path);
+                    }
                     
                     Log($"[Session開始] {baseName} (Path: {path})");
                     
@@ -290,6 +293,10 @@ namespace CBoxTTS.Native
 #elif USE_DML
                             try
                             {
+                                if (baseName.StartsWith("language_model"))
+                                {
+                                    throw new Exception($"Force {baseName} to run on CPU because DirectML EP does not support GroupQueryAttention node.");
+                                }
                                 options.AppendExecutionProvider_DML(0);
                                 session = new InferenceSession(path, options);
                                 detectedBackend = "DirectML";
@@ -590,7 +597,7 @@ namespace CBoxTTS.Native
 
                 // 入力テキスト長（トークン数）に応じた動的な最大トークン制限
                 // (英文の実効発声速度: 1テキストトークンあたり約 3.0〜3.2 音声トークン。余裕を持って inputIds.Length * 3.2 + 35 を設定し、無音後のハルシネーションを物理遮断)
-                int dynamicMaxTokens = Math.Min(600, Math.Max(60, (int)Math.Ceiling(inputIds.Length * 4.0f) + 60));
+                int dynamicMaxTokens = Math.Min(600, Math.Max(60, (int)Math.Ceiling(inputIds.Length * 3.5f) + 40));
                 int maxNewTokens = dynamicMaxTokens;
                 Log($"自己回帰ループ開始... (入力トークン数={inputIds.Length}, 動的最大トークン上限={maxNewTokens})");
 
@@ -892,7 +899,15 @@ namespace CBoxTTS.Native
                             }
 
                             // カンマや息継ぎポーズでの途中打ち切りを物理的に防止する最小必須ステップ
-                            int minSpeechStepsCuda = Math.Max(15, (int)(inputIds.Length * 1.2f));
+                            int minSpeechStepsCuda = Math.Max(10, (int)(inputIds.Length * 0.8f));
+
+                            float eosLogitValCuda = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
+                            int topTokenIdCuda = 0;
+                            float maxLogitCuda = logits[0];
+                            for (int v = 1; v < logits.Length; v++)
+                            {
+                                if (logits[v] > maxLogitCuda) { maxLogitCuda = logits[v]; topTokenIdCuda = v; }
+                            }
 
                             // 最小ステップ数に達するまでは、サンプリングによる偶発的な EOS 選択および誤終了を物理的に遮断 (-9999f に封印)
                             if (step < minSpeechStepsCuda && stopSpeechToken >= 0 && stopSpeechToken < logits.Length)
@@ -900,8 +915,18 @@ namespace CBoxTTS.Native
                                 logits[(int)stopSpeechToken] = -9999.0f;
                             }
 
-                            // モデルの自然な確率分布からサンプリング (カンマやポーズでの強制的スマートEOS上書きは排除)
-                            long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                            long nextToken;
+                            // 最小ステップ数に達した状態で、モデルが stopSpeechToken を Top-1 (最優位) と判定した場合のみ即座に EOS を出力して正常終了する。
+                            // これにより、文中の誤終了を防止しつつ、文末での確率的サンプリングによる EOS 読み飛ばしとハルシネーション（暴走）を物理的に防止。
+                            if (step >= minSpeechStepsCuda && topTokenIdCuda == stopSpeechToken)
+                            {
+                                nextToken = stopSpeechToken;
+                                Log($"[スマートEOS発動] 文末発声完了を検出(ステップ={step} >= {minSpeechStepsCuda}, EOS Logit={eosLogitValCuda:F2}, TopToken={topTokenIdCuda})。正常終了します。");
+                            }
+                            else
+                            {
+                                nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                            }
                             generateTokens.Add(nextToken);
 
                             if (nextToken == stopSpeechToken)
@@ -1144,7 +1169,15 @@ namespace CBoxTTS.Native
                         }
 
                         // カンマや息継ぎポーズでの途中打ち切りを物理的に防止する最小必須ステップ
-                        int minSpeechSteps = Math.Max(15, (int)(inputIds.Length * 1.2f));
+                        int minSpeechSteps = Math.Max(6, (int)(inputIds.Length * 0.8f));
+
+                        float eosLogitVal = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
+                        int topTokenId = 0;
+                        float maxLogit = logits[0];
+                        for (int v = 1; v < logits.Length; v++)
+                        {
+                            if (logits[v] > maxLogit) { maxLogit = logits[v]; topTokenId = v; }
+                        }
 
                         // 最小ステップ数に達するまでは、サンプリングによる偶発的な EOS 選択を物理的に遮断
                         if (step < minSpeechSteps && stopSpeechToken >= 0 && stopSpeechToken < logits.Length)
@@ -1152,8 +1185,18 @@ namespace CBoxTTS.Native
                             logits[(int)stopSpeechToken] = -9999.0f;
                         }
 
-                        // モデルの自然な確率分布からサンプリング (強制的スマートEOS上書きは排除)
-                        long nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                        long nextToken;
+                        // 最小ステップ数に達した状態で、モデルが stopSpeechToken を Top-1 (最優位) と判定した場合のみ即座に EOS を出力して正常終了する。
+                        // これにより、文中の誤終了を防止しつつ、文末での確率的サンプリングによる EOS 読み飛ばしとハルシネーション（暴走）を物理的に防止。
+                        if (step >= minSpeechSteps && topTokenId == stopSpeechToken)
+                        {
+                            nextToken = stopSpeechToken;
+                            Log($"[スマートEOS発動] 文末発声完了を検出(ステップ={step} >= {minSpeechSteps}, EOS Logit={eosLogitVal:F2}, TopToken={topTokenId})。正常終了します。");
+                        }
+                        else
+                        {
+                            nextToken = Sample(logits, temperature, 0.95f, 0.05f, random);
+                        }
                         generateTokens.Add(nextToken);
 
                         float eosLogit = (stopSpeechToken >= 0 && stopSpeechToken < logits.Length) ? logits[(int)stopSpeechToken] : -999f;
@@ -1238,7 +1281,7 @@ namespace CBoxTTS.Native
                 Log($"デコーダー出力: 先頭0.1秒の最大振幅 = {diagMaxAbs:F4}（0に近い場合は先頭が無音）");
 
                 // conditional_decoderの出力長は固定のため、先頭・末尾の無音を除去して実際の発話のみを返す (閾値0.003fで語尾を保護)
-                wavData = TrimSilence(wavData, 0.003f, 4800, 4800);
+                wavData = TrimSilence(wavData, 0.003f, 7200, 4800);
 
                 return wavData;
             });
@@ -1277,8 +1320,8 @@ namespace CBoxTTS.Native
                     lineText = EnglishNormalizer.Normalize(rawLine);
                 }
 
-                // 英語ではカンマ(,)での分断を行わず、フルセンテンス単位で処理して途切れや文脈損失を阻止
-                bool needCommaSplit = false;
+                // 英語: テキストが長文（60文字以上）の場合はカンマ(,)でスマート分割し、自己回帰アテンションの溢れ（単語リピート）を防止
+                bool needCommaSplit = isEnglish && lineText.Length > 60;
                 var split = SplitSentences(lineText, needCommaSplit);
                 sentences.AddRange(split);
             }
@@ -1415,8 +1458,22 @@ namespace CBoxTTS.Native
             float[] result;
             if (isEnglish)
             {
-                // 英語: クロスフェード結合でスラスラと自然に接続
-                result = CrossfadeJoinChunks(allWavChunks, crossfadeSamples: 1200); // 50ms @ 24kHz
+                // 英語: 各チャンク接続部に 40ms (960サンプル) の自然な息継ぎポーズ無音を追加し、クロスフェード結合
+                if (allWavChunks.Count > 1)
+                {
+                    int pauseGap = 960; // 40ms @ 24kHz
+                    for (int c = 0; c < allWavChunks.Count - 1; c++)
+                    {
+                        var chunk = allWavChunks[c];
+                        if (chunk != null && chunk.Length > 0)
+                        {
+                            var padded = new float[chunk.Length + pauseGap];
+                            Array.Copy(chunk, 0, padded, 0, chunk.Length);
+                            allWavChunks[c] = padded;
+                        }
+                    }
+                }
+                result = CrossfadeJoinChunks(allWavChunks, crossfadeSamples: 480);  // 20ms @ 24kHz — 文頭子音の減衰を最小化
             }
             else
             {
@@ -1557,9 +1614,9 @@ namespace CBoxTTS.Native
             }
 
             // トリム前後にマージンを持たせる。先頭側と末尾側に個別マージンを適用。
-            // セーフガード: 先頭の有音が0.3秒(7200サンプル)以内にある場合は先頭トリムをスキップ
-            // （先頭の子音・破裂音は振幅が小さく、マージンだけでは保護しきれないため）
-            if (startIdx <= 7200)
+            // セーフガード: 先頭の有音が0.6秒(14400サンプル)以内にある場合は先頭トリムをスキップ
+            // （先頭の子音・破裂音・機能語(In, The, A等)は振幅が小さく、マージンだけでは保護しきれないため）
+            if (startIdx <= 14400)
             {
                 startIdx = 0; // 先頭は切らない
             }

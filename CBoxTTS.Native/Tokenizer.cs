@@ -178,6 +178,13 @@ namespace CBoxTTS.Native
                 processed = PuncNorm(processed);
                 // 小文字化 (Python版の preprocess_text と揃える)
                 processed = processed.ToLowerInvariant();
+                // BPE語彙はスペース付きトークン(Ġword)が標準形式。
+                // 文頭にスペースを補って正しいトークンIDにマッピングさせる。
+                // これにより "in" → " in" (Ġin, ID:259) となり、モデルが正常に発音する。
+                if (!processed.StartsWith(" "))
+                {
+                    processed = " " + processed;
+                }
             }
 
             // NFD正規化: 日本語の濁音分解（「が」→「か」+「゛」）に必要だが、

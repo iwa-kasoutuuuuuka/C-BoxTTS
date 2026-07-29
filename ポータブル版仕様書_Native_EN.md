@@ -106,12 +106,21 @@ MyTech,my tech
 ```
 ※ 辞書ファイルを編集した後は、アプリケーションを再起動することで変更が反映されます。
 
-### CLI テストハーネス (コマンドライン起動)
-コマンドプロンプトまたは PowerShell から以下の引数を指定して起動することで、GUI を表示させずに一気通貫の合成合成テストを実行し、動作確認用の WAV ファイルを出力できます。
+### CLI テストハーネス・文字起こし自動デバッグ (コマンドライン起動)
+コマンドプロンプトまたは PowerShell から以下の引数を指定して起動することで、GUI を表示させずに音声合成テストや文字起こし照合自動デバッグを実行できます。
 
 ```powershell
+# テストハーネス実行
 .\CBoxTTS.Native.EN.exe --test
+
+# 音声認識（Whisper STT）文字起こし自動照合デバッグ実行
+.\CBoxTTS.Native.EN.exe --auto-debug
 ```
 
-*   **動作ログ**: `test_harness.log` に処理ステップ（トークナイズ -> 推論 -> 音声出力）の全記録が出力されます。
-*   **出力ファイル**: 合成された英語音声が `test_harness_english_exclusive_out.wav` などとして保存されます。
+- **`--test`**: 合成テストを実行し `test_harness_english_exclusive_out.wav` を出力。
+- **`--auto-debug`**: `sample_sentences_en.txt` に記述されたサンプル文章を一括合成し、同梱された Whisper STT 高精度モデル (`Whisper.net` + `ggml-base.en.bin`) で自動文字起こしを行い、文章の一致率（%）および不一致単語（脱落・置換）を `auto_debug_report.log` にログ出力します（実測平均一致率 **95.6%**）。
+
+---
+
+## 4. サンプル文章ファイル (`sample_sentences_en.txt`)
+`Release_Portable_EN` 内の `sample_sentences_en.txt` に任意の英文を追記・編集することで、`--auto-debug` 実行時の検証文章を自由に拡張できます（`#` で始まる行はコメント）。

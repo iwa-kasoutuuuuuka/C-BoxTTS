@@ -584,6 +584,42 @@ namespace CBoxTTS.Native
             }
         }
 
+        private void InputTextBox_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                e.Handled = true;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+        }
+
+        private async void InputTextBox_Drop(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                string[]? files = e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (files != null && files.Length > 0)
+                {
+                    string file = files[0];
+                    try
+                    {
+                        using var stream = File.OpenRead(file);
+                        using var reader = new StreamReader(stream, System.Text.Encoding.Default, detectEncodingFromByteOrderMarks: true);
+                        string text = await reader.ReadToEndAsync();
+                        InputTextBox.Text = text;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(GetMsg($"ファイルの読み込みに失敗しました:\n{ex.Message}", $"Failed to read file:\n{ex.Message}"), GetMsg("エラー", "Error"), MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+            }
+        }
+
         private void SelectVoice_Click(object sender, RoutedEventArgs e)
         {
             var ofd = new OpenFileDialog

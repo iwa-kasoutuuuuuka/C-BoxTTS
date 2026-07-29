@@ -146,6 +146,7 @@
                             <TextBox x:Name="InputTextBox" Background="Transparent" Foreground="White" BorderThickness="0" 
                                      FontSize="20" TextWrapping="Wrap" AcceptsReturn="True" 
                                      VerticalScrollBarVisibility="Auto" TextChanged="InputTextBox_TextChanged"
+                                     AllowDrop="True" PreviewDragOver="InputTextBox_DragOver" Drop="InputTextBox_Drop"
                                      CaretBrush="White" SelectionBrush="{StaticResource PrimaryBrush}"/>
                             
                             <TextBlock x:Name="WatermarkText" Text="ここに読み上げたい日本語を入力してください..." 

@@ -100,7 +100,7 @@ namespace CBoxTTS.Native
         // 頭字語の例外（そのまま単語として発音する既知の頭字語）
         private static readonly HashSet<string> KnownAcronymsAsWords = new(StringComparer.OrdinalIgnoreCase)
         {
-            "UI", "API", "ID", "SDK", "ML", "DL", "GPU", "CPU",
+            "AI", "UI", "API", "ID", "SDK", "ML", "DL", "GPU", "CPU",
             "NASA", "NATO", "ASAP", "SCUBA", "LASER", "RADAR", "AIDS", "JPEG", "GIF",
             "BIOS", "LAN", "WAN", "RAM", "SIM", "VRAM", "SCADA", "PID"
         };
@@ -179,8 +179,17 @@ namespace CBoxTTS.Native
                 text = item.Regex.Replace(text, item.Value);
             }
 
-            // 0. 特殊頭字語 (AI) の確実な発音正規化 ("AI" -> "A. I.")
-            text = Regex.Replace(text, @"\bAI\b", "A. I.");
+            // 0. 特殊製品名 (De-VIEW / DeVIEW / Dee-View) の発音正規化 (De-VIEW -> deview)
+            text = Regex.Replace(text, @"\bDe-VIEW\b|\bDeVIEW\b|\bDe\s*VIEW\b|\bDee-View\b", "deview", RegexOptions.IgnoreCase);
+
+            // 0. 誤綴り（Anormaly -> Anomaly）の自動補正
+            text = Regex.Replace(text, @"\bAnormaly\b", "Anomaly", RegexOptions.IgnoreCase);
+
+            // 0. 不要なダブルクォーテーション記号のサニタイズ（モデルの誤読・余分な単語リピート防止）
+            text = Regex.Replace(text, @"[""“”]", "");
+
+            // 0. 複合句の自発的単語リピート防止（息継ぎカンマの挿入）
+            text = Regex.Replace(text, @"\bdetection\s+and\s+segmentation\b", "detection, and segmentation", RegexOptions.IgnoreCase);
 
             // 0. URL・メールアドレスの除去
             text = UrlRegex.Replace(text, "");
