@@ -118,6 +118,9 @@
                                     <Button x:Name="SelectVoiceButton" Grid.Column="1" Content="選択" Width="50" Margin="5,0,0,0" Click="SelectVoice_Click"/>
                                 </Grid>
 
+                                <!-- デバッグ文字起こし検証ログ出力 -->
+                                <CheckBox x:Name="DebugSttCheckBox" Content="デバッグ文字起こし検証ログを出力" Foreground="LightGray" Margin="0,5,0,15" ToolTip="音声合成時に Whisper STT で文字起こしを行い、一致率と結果を WAV と同じフォルダに保存します。"/>
+
                                 <!-- 進行状況 -->
                                 <StackPanel VerticalAlignment="Bottom" Margin="0,30,0,0">
                                     <TextBlock x:Name="StatusText" Text="初期化中..." Foreground="Orange" FontSize="12" TextWrapping="Wrap"/>

@@ -16,6 +16,7 @@ namespace CBoxTTS.Native
         private MorphemeEngine? _morph;
         private Tokenizer? _tokenizer;
         private AudioEngine _audio = new();
+        private WhisperVerifier? _whisperVerifier;
         private bool _isInitialized = false;
         private bool _isUpdatingSelection = false;
 
@@ -822,6 +823,7 @@ namespace CBoxTTS.Native
                                 });
                         });
                         _audio.SaveWav(wav, baseFilePath, speed);
+                        await ProcessDebugSttIfEnabledAsync(lines[0], baseFilePath, wav);
                     }
                     else
                     {
@@ -859,6 +861,7 @@ namespace CBoxTTS.Native
                                     });
                             });
                             _audio.SaveWav(wav, numberedPath, speed);
+                            await ProcessDebugSttIfEnabledAsync(line, numberedPath, wav);
                         }
                     }
 
@@ -895,8 +898,32 @@ namespace CBoxTTS.Native
 #endif
         }
 
+        private async Task ProcessDebugSttIfEnabledAsync(string originalText, string wavPath, float[] pcmWav)
+        {
+            if (DebugSttCheckBox.IsChecked != true) return;
+
+            try
+            {
+                Dispatcher.Invoke(() => StatusText.Text = GetMsg("デバッグ文字起こし検証中 (Whisper STT)...", "Verifying STT with Whisper..."));
+
+                _whisperVerifier ??= new WhisperVerifier(AppContext.BaseDirectory);
+                await _whisperVerifier.EnsureModelExistsAsync((msg, pct) =>
+                {
+                    Dispatcher.Invoke(() => StatusText.Text = $"{msg} ({pct:F0}%)");
+                });
+
+                string langCode = GetCurrentLangToken() == 723 ? "ja" : "en";
+                await _whisperVerifier.GenerateDebugTextFileAsync(originalText, wavPath, pcmWav, langCode);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Debug STT Error] {ex.Message}");
+            }
+        }
+
         protected override void OnClosed(EventArgs e)
         {
+            _whisperVerifier?.Dispose();
             _engine?.Dispose();
             _morph?.Dispose();
             _audio?.Dispose();
